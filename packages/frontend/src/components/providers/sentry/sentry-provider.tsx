@@ -12,7 +12,7 @@ export const SentryProvider = ({ children }: PropsWithChildren) => {
         release: version.current,
         environment: 'production',
         tracesSampleRate: 1.0,
-        dsn: 'https://aecdfa00da8a0b388b9cfa4e38ef78c4@o4504242900238336.ingest.us.sentry.io/4508296168275968',
+        dsn: 'https://ec97a64bc44ff663fd731a2c994dbd0d@o4509948475408384.ingest.us.sentry.io/4510038834085888',
         integrations: [Sentry.browserTracingIntegration()],
         initialScope: {
           tags: { version: version.current },

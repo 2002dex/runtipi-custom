@@ -2840,7 +2840,45 @@
             "type": "number"
           },
           "percentUsedMemory": {
-            "type": "number"
+            "default": 0,
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "zpoolName": {
+            "anyOf": [
+              { 
+                "type": "string" 
+              },
+              { 
+                "type": "null" 
+              }
+            ]
+          },
+          "zpoolHealth": {
+            "anyOf": [
+              { 
+                "type": "string" 
+              },
+              { 
+                "type": "null" 
+              }
+            ]
+          },
+          "zpoolCap": {
+            "anyOf": [
+              { 
+                "type": "number" 
+              },
+              { 
+                "type": "null" 
+              }
+            ]
           }
         },
         "required": [

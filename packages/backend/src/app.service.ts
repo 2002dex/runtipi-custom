@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import * as Sentry from '@sentry/nestjs';
+import { LATEST_RELEASE_URL } from './common/constants';
 import { execFileAsync } from './common/helpers/exec-helpers';
 import { CacheService, ONE_DAY_IN_SECONDS } from './core/cache/cache.service';
 import { ConfigurationService } from './core/config/configuration.service';
@@ -65,7 +66,7 @@ export class AppService {
 
       // Every 15 minutes, check for updates to the apps repo
       if (__prod__) {
-        this.repoQueue.publishRepeatable({ command: 'update_all' }, '*/15 * * * *');
+        this.repoQueue.publishRepeatable({ command: 'update_all' }, '0 */12 * * *');
       }
       this.systemEventsQueue.publishRepeatable({ command: 'sync_app_statuses' }, '*/5 * * * *');
 
@@ -84,17 +85,49 @@ export class AppService {
   public async getVersion() {
     const { version: currentVersion } = this.configuration.getConfig();
 
-    const [githubRelease, releasesSince] = await Promise.all([
-      this.githubService.getLatestRelease('runtipi', 'runtipi'),
-      this.githubService.getReleasesSince('runtipi', 'runtipi', currentVersion),
-    ]);
+    try {
+      let version = this.cache.get('latestVersion') ?? '';
+      let body = this.cache.get('latestVersionBody') ?? '';
 
-    return {
-      current: currentVersion,
-      latest: githubRelease?.version || currentVersion,
-      body: githubRelease?.body ?? '',
-      releases: releasesSince,
-    };
+      if (!version) {
+        version = currentVersion;
+        // Fetch the latest version in the background
+        (async () => {
+          try {
+            const response = await fetch(LATEST_RELEASE_URL);
+            if (!response.ok) {
+              this.logger.error(`Failed to fetch latest version from GitLab: ${response.statusText}`);
+              return;
+            }
+            const data = await response.json();
+            const tagName = typeof data?.tag_name === 'string' ? data.tag_name : '';
+            const description = typeof data?.description === 'string' ? data.description : '';
+
+            if (!tagName) {
+              this.logger.error(`Unexpected response shape when fetching latest version: ${JSON.stringify(data)}`);
+              return;
+            }
+
+            version = tagName;
+            body = description;
+
+            this.cache.set('latestVersion', version, 60 * 60);
+            this.cache.set('latestVersionBody', body, 60 * 60);
+          } catch (err) {
+            this.logger.error(`Failed to fetch latest version: ${err}`);
+          }
+        })();
+      }
+
+      return { current: currentVersion, latest: version, body };
+    } catch (e) {
+      this.logger.error(e);
+      return {
+        current: currentVersion,
+        latest: currentVersion,
+        body: '',
+      };
+    }
   }
 
   public async copyAssets() {
@@ -233,7 +266,7 @@ export class AppService {
       }),
     );
 
-    const subject = `/O=runtipi.io/OU=IT/CN=*.${data.localDomain}/emailAddress=webmaster@${data.localDomain}`;
+    const subject = `/O=dspworks.in/OU=IT/CN=*.${data.localDomain}/emailAddress=webmaster@${data.localDomain}`;
     const subjectAltName = `DNS:*.${data.localDomain},DNS:${data.localDomain}`;
 
     try {

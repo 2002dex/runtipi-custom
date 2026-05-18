@@ -41,7 +41,7 @@ export class DebugService {
 
     await this.appstoreService.createAppStore({
       name: 'seed',
-      url: 'https://github.com/runtipi/example-appstore',
+      url: 'https://gitlab.com/dspworks-public/sm-app-store.git',
     });
 
     await this.marketplaceService.initialize();

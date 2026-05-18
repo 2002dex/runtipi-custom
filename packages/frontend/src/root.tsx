@@ -7,6 +7,7 @@ import { client } from './api-client/client.gen';
 import stylesheet from './app.css?url';
 import { Providers } from './components/providers/providers';
 import { TranslatableError } from './types/error.types';
+import { Footer } from './components/footer/footer';
 
 client.interceptors.response.use(async (res) => {
   if (res.status >= 400) {
@@ -27,8 +28,8 @@ client.setConfig({
 export const links: Route.LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
   { rel: 'apple-touch-icon', sizes: '180x180', href: '/icons/apple-touch-icon.png' },
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/icons/favicon-96x96.png' },
-  { rel: 'icon', type: 'image/svg+xml', href: '/icons/favicon.svg' },
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/icons/favicon-32x32.png' },
+  { rel: 'icon', type: 'image/png', href: '/icons/favicon-16x16.png' },
   { rel: 'shortcut icon', href: '/icons/favicon.ico' },
   { rel: 'manifest', href: '/icons/site.webmanifest' },
 ];
@@ -67,7 +68,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
-        <title>Runtipi</title>
+        <title>Smritimegh</title>
         <meta charSet="UTF-8" />
         <script src="/js/tabler.min.js" async />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -88,7 +89,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App({ loaderData }: Route.ComponentProps) {
   return (
     <Providers>
-      <Outlet />
+      <div className="d-flex flex-column min-vh-100">
+        <div className="flex-grow-1">
+          <Outlet />
+        </div>
+        <Footer />
+      </div>
       <Toaster />
     </Providers>
   );

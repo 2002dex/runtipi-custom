@@ -19,7 +19,7 @@ export const AppStoresContainer = () => {
         <h2 className="mb-0">{t('SETTINGS_APPSTORES_TITLE')}</h2>
       </div>
       <p className="text-muted">{t('SETTINGS_APPSTORES_SUBTITLE')}</p>
-      <Alert variant="warning">
+      {/* <Alert variant="warning">
         <AlertIcon>
           <IconAlertCircle stroke={2} />
         </AlertIcon>
@@ -27,7 +27,7 @@ export const AppStoresContainer = () => {
           <AlertHeading>{t('COMMON_WARNING')}</AlertHeading>
           <AlertDescription>{t('SETTINGS_APPSTORES_WARNING')}</AlertDescription>
         </div>
-      </Alert>
+      </Alert> */}
       <AppStoresTable appStores={data.appStores} />
     </div>
   );

@@ -283,7 +283,7 @@ export class AuthService {
 
     await this.userRepository.updateUser(userId, { totpSecret: encryptedTotpSecret, salt });
 
-    const uri = TotpAuthenticator.keyuri(user.username, 'Runtipi', newTotpSecret);
+    const uri = TotpAuthenticator.keyuri(user.username, 'Smritimegh', newTotpSecret);
 
     return { uri, key: newTotpSecret };
   };

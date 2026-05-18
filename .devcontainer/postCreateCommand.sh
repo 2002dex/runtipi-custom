@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 echo '{ 
-    "appsRepoUrl": "https://github.com/runtipi/runtipi-appstore.git/"
+    "appsRepoUrl": "https://gitlab.com/dspworks-public/sm-app-store.git"
 }' > state/settings.json
 npm i -g pnpm
 pnpm i

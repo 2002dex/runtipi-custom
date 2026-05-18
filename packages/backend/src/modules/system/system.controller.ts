@@ -1,7 +1,7 @@
-import { Controller, Get, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
-import { LoadDto } from './dto/system.dto';
+import { LoadDto, RestartDto, UpdateDto } from './dto/system.dto';
 import { SystemService } from './system.service';
 import { ApiResponse } from '@nestjs/swagger';
 
@@ -27,5 +27,21 @@ export class SystemController {
     });
 
     return res.send(cert);
+  }
+  
+  @Post('/restart')
+  @UseGuards(AuthGuard)
+  @ApiResponse({ type: RestartDto })
+  async restartSystem(): Promise<RestartDto> {
+    const res = await this.systemService.restartSmritimegh();
+    return res;
+  }
+
+  @Post('/update')
+  @UseGuards(AuthGuard)
+  @ApiResponse({ type: UpdateDto })
+  async updateSystem(): Promise<UpdateDto> {
+    const res = await this.systemService.updateSmritimegh();
+    return res;
   }
 }

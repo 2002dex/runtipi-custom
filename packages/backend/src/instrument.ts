@@ -7,7 +7,7 @@ Sentry.init({
   release: TIPI_VERSION,
   enabled: false,
   tracesSampleRate: 1.0,
-  dsn: 'https://6cc88df40d1cdd0222ff30d996ca457c@o4504242900238336.ingest.us.sentry.io/4508264534835200',
+  dsn: 'https://6c41590b241cb84886736e9ac1402bd2@o4509948475408384.ingest.us.sentry.io/4510011977498624',
   environment: NODE_ENV,
   beforeSend: cleanseErrorData,
   includeLocalVariables: true,

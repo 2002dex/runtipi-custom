@@ -5,6 +5,7 @@
 *.swo
 *.swp
 
+*:Zone.Identifier
 .DS_Store
 .vscode
 .idea

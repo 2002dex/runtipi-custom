@@ -24,3 +24,27 @@ body {
   max-width: 300px;
   text-align: center;
 }
+/* Sticky Footer Layout */
+.min-vh-100 {
+  min-height: 100vh;
+}
+
+.flex-grow-1 {
+  flex: 1;
+}
+/* Config Objects dropdown styling fixes */
+.objects-dropdown .objects-menu:not([class*="bg-"]) {
+  background-color: var(--bs-dropdown-bg, var(--bs-body-bg));
+  border-color: var(--bs-border-color);
+}
+.objects-dropdown .objects-menu .list-group-item {
+  background-color: var(--bs-dropdown-bg, var(--bs-body-bg));
+  color: var(--bs-dropdown-color, var(--bs-body-color));
+}
+.objects-dropdown .objects-menu .list-group-item.active {
+  background-color: var(--bs-dropdown-link-active-bg, var(--bs-primary));
+  color: var(--bs-dropdown-link-active-color, var(--bs-white));
+}
+.objects-dropdown .badge.bg-primary {
+  color: var(--bs-white);
+}

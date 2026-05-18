@@ -10,7 +10,7 @@ import { DATA_DIR } from '../constants';
 import { type } from 'arktype';
 
 const OLD_DEFAULT_REPO_URL = 'https://github.com/meienberger/runtipi-appstore';
-export const DEFAULT_REPO_URL = 'https://github.com/runtipi/runtipi-appstore';
+export const DEFAULT_REPO_URL = 'https://gitlab.com/dspworks-public/sm-app-store.git';
 
 /**
  * Generates a random seed if it does not exist yet
@@ -109,9 +109,9 @@ export const generateSystemEnvFile = async (): Promise<Map<string, string>> => {
   envMap.set('DNS_IP', settings.dnsIp || envMap.get('DNS_IP') || '9.9.9.9');
   envMap.set('ARCHITECTURE', getArchitecture());
   envMap.set('JWT_SECRET', jwtSecret);
-  envMap.set('DOMAIN', settings.domain || envMap.get('DOMAIN') || 'example.com');
+  envMap.set('DOMAIN', settings.domain || envMap.get('DOMAIN') || 'smritimegh.in');
   envMap.set('RUNTIPI_APP_DATA_PATH', appDataPath || rootFolderHost);
-  envMap.set('RUNTIPI_FORWARD_AUTH_URL', settings.forwardAuthUrl || envMap.get('RUNTIPI_FORWARD_AUTH_URL') || 'http://runtipi:3000/api/auth/traefik');
+  envMap.set('RUNTIPI_FORWARD_AUTH_URL', settings.forwardAuthUrl || envMap.get('RUNTIPI_FORWARD_AUTH_URL') || 'http://smritimegh:3000/api/auth/traefik');
   envMap.set('POSTGRES_HOST', 'runtipi-db');
   envMap.set('POSTGRES_DBNAME', 'tipi');
   envMap.set('POSTGRES_USERNAME', 'tipi');
@@ -121,7 +121,7 @@ export const generateSystemEnvFile = async (): Promise<Map<string, string>> => {
     'GUEST_DASHBOARD',
     typeof settings.guestDashboard === 'boolean' ? String(settings.guestDashboard) : envMap.get('GUEST_DASHBOARD') || 'false',
   );
-  envMap.set('LOCAL_DOMAIN', settings.localDomain || envMap.get('LOCAL_DOMAIN') || 'tipi.lan');
+  envMap.set('LOCAL_DOMAIN', settings.localDomain || envMap.get('LOCAL_DOMAIN') || 'smritimegh.local');
   envMap.set(
     'ALLOW_AUTO_THEMES',
     typeof settings.allowAutoThemes === 'boolean' ? String(settings.allowAutoThemes) : envMap.get('ALLOW_AUTO_THEMES') || 'true',

@@ -33,6 +33,12 @@ export default [
 
     // Settings route
     ...prefix('settings', [index('./modules/settings/pages/settings-page.tsx', { id: 'settings' })]),
+
+    // Config route
+    ...prefix('config', [index('./modules/config/pages/config-page.tsx', { id: 'config' })]),
+    
+    // External USB route
+    ...prefix('external-usb', [index('./modules/external-usb/pages/external-usb-page.tsx', { id: 'external-usb' })]),
   ]),
   route('*', './routes/not-found.tsx'),
 ] satisfies RouteConfig;

@@ -38,7 +38,6 @@ const versionSchema = type({
   current: 'string',
   latest: 'string',
   body: 'string',
-  releases: type({ version: 'string', body: 'string' }).array(),
 });
 
 const appContextSchema = type({
@@ -60,7 +59,6 @@ const userContextDto = type({
     current: 'string',
     latest: 'string',
     body: 'string',
-    releases: type({ version: 'string', body: 'string' }).array(),
   },
   isLoggedIn: 'boolean',
   isConfigured: 'boolean',

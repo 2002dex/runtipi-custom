@@ -9,7 +9,7 @@
     "dev": "nest start --watch --preserveWatchOutput",
     "bundle": "rm -rf dist && bun build.ts",
     "tsc": "npx tsgo --noEmit",
-    "sentry:sourcemaps": "sentry-cli sourcemaps inject --org runtipi --project runtipi-backend ./dist && sentry-cli sourcemaps upload --org runtipi --project runtipi-backend ./dist",
+    "sentry:sourcemaps": "sentry-cli sourcemaps inject --org dspworks --project node-nestjs ./dist && sentry-cli sourcemaps upload --org dspworks --project node-nestjs ./dist",
     "test": "vitest --coverage --watch=false",
     "test:integration": "vitest --watch=false --config ./vitest.integration.config.mts",
     "test:watch": "vitest",

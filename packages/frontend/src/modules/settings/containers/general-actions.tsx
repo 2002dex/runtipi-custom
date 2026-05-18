@@ -5,6 +5,8 @@ import { IconStar } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import semver from 'semver';
 import { UpdateRepoModal } from '../components/update-repo-modal/update-repo-modal';
+import { RestartModal } from '../components/restart-modal/restart-modal';
+import { UpdateModal } from '../components/update-modal/update-modal';
 
 export const GeneralActionsContainer = () => {
   const { t } = useTranslation();
@@ -19,21 +21,21 @@ export const GeneralActionsContainer = () => {
 
     return (
       <div>
-        {version.releases?.map((release) => (
-          <div key={release.version} className="mt-3 card col-12 col-md-8">
+        {version.body && (
+          <div className="mt-3 card col-12 col-md-8">
             <div className="card-stamp">
               <div className="card-stamp-icon bg-yellow">
                 <IconStar size={80} />
               </div>
             </div>
-            <div className="card-header">
-              <h3 className="card-title">Version {release.version}</h3>
-            </div>
             <div className="card-body">
-              <Markdown className="" content={release.body} />
+              <Markdown className="" content={version.body} />
             </div>
           </div>
-        ))}
+        )}
+        <h3 className="card-title mt-4">{t('SETTINGS_ACTIONS_UPDATE_TITLE')}</h3>
+        <p className="card-subtitle">{t('SETTINGS_ACTIONS_UPDATE_SUBTITLE')}</p>
+        <UpdateModal />
       </div>
     );
   };
@@ -49,6 +51,9 @@ export const GeneralActionsContainer = () => {
       <h3 className="card-title mt-4">{t('SETTINGS_ACTIONS_UPDATE_REPO_TITLE')}</h3>
       <p className="card-subtitle">{t('SETTINGS_ACTIONS_UPDATE_REPO_SUBTITLE')}</p>
       <UpdateRepoModal />
+      <h3 className="card-title mt-4">{t('SETTINGS_ACTIONS_RESTART_TITLE')}</h3>
+      <p className="card-subtitle">{t('SETTINGS_ACTIONS_RESTART_SUBTITLE')}</p>
+      <RestartModal />
     </div>
   );
 };

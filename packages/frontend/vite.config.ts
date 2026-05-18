@@ -19,8 +19,11 @@ if (NODE_ENV === 'production') {
       release: {
         name: process.env.TIPI_VERSION,
       },
-      org: 'runtipi',
-      project: 'runtipi-frontend',
+      org: 'dspworks',
+      project: 'javascript-react',
+      telemetry: false,
+      sourcemapPathStrip: 'packages/frontend/',
+      errorHandler: 'warn',
     }) as PluginOption,
   );
 }

@@ -316,7 +316,7 @@ export const UserSettingsForm = (props: IProps) => {
               </>
             }
             error={errors.appsRepoUrl?.message}
-            placeholder="https://github.com/runtipi/runtipi-appstore"
+            placeholder="https://gitlab.com/dspworks-public/sm-app-store.git"
           />
         </div>
         <div>
@@ -344,7 +344,7 @@ export const UserSettingsForm = (props: IProps) => {
               </>
             }
             error={errors.localDomain?.message}
-            placeholder="tipi.lan"
+            placeholder="smritimegh.local"
             disabled={initialValues?.advancedSettings === false}
           />
           <Button className="mt-2 mb-2" onClick={downloadCertificate}>
@@ -396,7 +396,7 @@ export const UserSettingsForm = (props: IProps) => {
                   </>
                 }
                 error={errors.domain?.message}
-                placeholder="example.com"
+                placeholder="smritimegh.in"
               />
             </div>
             <div className="mb-3">

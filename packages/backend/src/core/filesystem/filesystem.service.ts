@@ -19,6 +19,7 @@ export class FilesystemService {
       path.resolve(DATA_DIR),
       path.resolve('/host/proc/'),
       path.resolve('/tmp/'),
+      path.resolve('/mnt/storage/'),
     ];
 
     // Resolve and normalize the file path to an absolute path

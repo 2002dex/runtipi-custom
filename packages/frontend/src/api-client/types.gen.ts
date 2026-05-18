@@ -18,10 +18,6 @@ export type UserContextDto = {
         body: string;
         current: string;
         latest: string;
-        releases: Array<{
-            body: string;
-            version: string;
-        }>;
     };
 };
 
@@ -76,10 +72,6 @@ export type AppContextDto = {
         body: string;
         current: string;
         latest: string;
-        releases: Array<{
-            body: string;
-            version: string;
-        }>;
     };
 };
 
@@ -121,6 +113,9 @@ export type LoadDto = {
     memoryTotal: number;
     percentUsed: number;
     percentUsedMemory: number;
+    zpoolName?: string | null;
+    zpoolHealth?: string | null;
+    zpoolCap?: number | null;
 };
 
 export type LoginBody = {

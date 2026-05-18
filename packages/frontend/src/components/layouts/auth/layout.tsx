@@ -17,10 +17,10 @@ export const AuthLayout = ({ children }: PropsWithChildren) => {
       <div className="container container-tight py-4">
         <div className="text-center mb-4">
           <img
-            alt="Runtipi logo"
+            alt="Smritimegh logo"
             src={getLogo(allowAutoThemes)}
-            height={64}
-            width={64}
+            height={50}
+            width={200}
             style={{
               maxWidth: '100%',
               height: 'auto',
