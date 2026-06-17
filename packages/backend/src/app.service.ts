@@ -82,11 +82,16 @@ export class AppService {
   }
 
   public async getVersion() {
-    const { version: currentVersion } = this.configuration.getConfig();
+    const { version: currentVersion, releaseUrl } = this.configuration.getConfig();
+
+    // If TIPI_RELEASE_URL is set, use it as the source (supports GitLab URLs).
+    // Otherwise, default to GitHub runtipi/runtipi.
+    const releaseSource = releaseUrl || 'runtipi';
+    const releaseRepo = releaseUrl ? releaseUrl : 'runtipi';
 
     const [githubRelease, releasesSince] = await Promise.all([
-      this.githubService.getLatestRelease('runtipi', 'runtipi'),
-      this.githubService.getReleasesSince('runtipi', 'runtipi', currentVersion),
+      this.githubService.getLatestRelease(releaseSource, releaseRepo),
+      this.githubService.getReleasesSince(releaseSource, releaseRepo, currentVersion),
     ]);
 
     return {

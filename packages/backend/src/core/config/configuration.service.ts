@@ -47,6 +47,7 @@ const envSchema = type({
   THEME_BASE: 'string',
   THEME_COLOR: 'string',
   MAX_BACKUPS: type('number | string.numeric.parse').default(0),
+  TIPI_RELEASE_URL: 'string = ""',
   // Experimental flags
   EXPERIMENTAL_INSECURE_COOKIE: 'string',
 });
@@ -178,6 +179,7 @@ export class ConfigurationService {
       envFilePath: this.envPath,
       internalIp: env.INTERNAL_IP,
       jwtSecret: env.JWT_SECRET,
+      releaseUrl: env.TIPI_RELEASE_URL || '',
       __prod__: NODE_ENV === 'production',
     };
   }
