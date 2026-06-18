@@ -10,8 +10,12 @@ import * as Sentry from '@sentry/nestjs';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/node';
 
+type RepoOperationResult = { success: boolean; message: string };
+
 @Injectable()
 export class ReposHelpers {
+  private repoOperations = new Map<string, Promise<RepoOperationResult>>();
+
   constructor(
     private readonly logger: LoggerService,
     private readonly configuration: ConfigurationService,
@@ -61,6 +65,28 @@ export class ReposHelpers {
     return { success: false, message: `An error occurred: ${String(err)}` };
   }
 
+  private async runWithRepoLock(id: string, operation: () => Promise<RepoOperationResult>): Promise<RepoOperationResult> {
+    const previousOperation = this.repoOperations.get(id);
+
+    const currentOperation = (async () => {
+      if (previousOperation) {
+        await previousOperation.catch(() => undefined);
+      }
+
+      return operation();
+    })();
+
+    this.repoOperations.set(id, currentOperation);
+
+    try {
+      return await currentOperation;
+    } finally {
+      if (this.repoOperations.get(id) === currentOperation) {
+        this.repoOperations.delete(id);
+      }
+    }
+  }
+
   /**
    * Ensure directory exists and has correct permissions
    * @param {string} dirPath
@@ -76,12 +102,30 @@ export class ReposHelpers {
     });
   }
 
-  /**
-   * Given a repo url, clone it to the repos folder if it doesn't exist
-   *
-   * @param {string} url
-   */
-  public async cloneRepo(url: string, id: string) {
+  private async cloneRepoToPath(url: string, repoPath: string) {
+    const [repoUrl, branch] = this.getRepoBaseUrlAndBranch(url);
+
+    if (!repoUrl) {
+      throw new Error(`Invalid repo URL: ${url}`);
+    }
+
+    this.logger.debug(`Cloning repo ${repoUrl}${branch ? ` on branch ${branch}` : ''} to ${repoPath}`);
+
+    await this.ensureDirectoryWithPermissions(path.dirname(repoPath));
+    await git.clone({
+      fs,
+      http,
+      dir: repoPath,
+      url: repoUrl,
+      singleBranch: true,
+      depth: 1,
+      ref: branch || undefined,
+    });
+
+    this.logger.info(`Cloned repo ${repoUrl} to ${repoPath}`);
+  }
+
+  private async cloneRepoUnlocked(url: string, id: string): Promise<RepoOperationResult> {
     try {
       const { dataDir } = this.configuration.get('directories');
       const repoPath = path.join(dataDir, 'repos', id);
@@ -92,31 +136,60 @@ export class ReposHelpers {
         return { success: true, message: '' };
       }
 
-      const [repoUrl, branch] = this.getRepoBaseUrlAndBranch(url);
+      await this.cloneRepoToPath(url, repoPath);
 
-      if (!repoUrl) {
-        this.logger.error(`Invalid repo URL: ${url}`);
-        return { success: false, message: `Invalid repo URL: ${url}` };
-      }
-
-      this.logger.debug(`Cloning repo ${repoUrl}${branch ? ` on branch ${branch}` : ''} to ${repoPath}`);
-
-      await this.ensureDirectoryWithPermissions(path.dirname(repoPath));
-      await git.clone({
-        fs,
-        http,
-        dir: repoPath,
-        url: repoUrl,
-        singleBranch: true,
-        depth: 1,
-        ref: branch || undefined,
-      });
-
-      this.logger.info(`Cloned repo ${repoUrl} to ${repoPath}`);
       return { success: true, message: '' };
     } catch (err) {
       return this.handleRepoError(err);
     }
+  }
+
+  private async replaceRepoWithFreshClone(url: string, id: string): Promise<RepoOperationResult> {
+    const { dataDir } = this.configuration.get('directories');
+    const reposPath = path.join(dataDir, 'repos');
+    const repoPath = path.join(reposPath, id);
+    const nonce = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
+    const tempPath = path.join(reposPath, `.${id}.tmp-${nonce}`);
+    const backupPath = path.join(reposPath, `.${id}.backup-${nonce}`);
+    let movedExistingRepo = false;
+
+    try {
+      await this.cloneRepoToPath(url, tempPath);
+
+      if (await this.filesystem.pathExists(repoPath)) {
+        await fs.promises.rename(repoPath, backupPath);
+        movedExistingRepo = true;
+      }
+
+      await fs.promises.rename(tempPath, repoPath);
+
+      if (movedExistingRepo) {
+        await this.filesystem.removeDirectory(backupPath);
+      }
+
+      this.logger.info(`Replaced repo ${id} with a fresh clone`);
+      return { success: true, message: '' };
+    } catch (err) {
+      if (await this.filesystem.pathExists(tempPath)) {
+        await this.filesystem.removeDirectory(tempPath);
+      }
+
+      if (movedExistingRepo && !(await this.filesystem.pathExists(repoPath)) && (await this.filesystem.pathExists(backupPath))) {
+        this.logger.warn(`Restoring previous repo ${id} after refresh failed`);
+        await fs.promises.rename(backupPath, repoPath);
+      }
+
+      return this.handleRepoError(err);
+    }
+  }
+
+  /**
+   * Given a repo url, clone it to the repos folder if it doesn't exist
+   *
+   * @param {string} url
+   */
+  public async cloneRepo(url: string, id: string) {
+    return this.runWithRepoLock(id, () => this.cloneRepoUnlocked(url, id));
   }
 
   /**
@@ -125,18 +198,26 @@ export class ReposHelpers {
    * @param {string} repoUrl
    */
   public async pullRepo(repoUrl: string, slug: string) {
+    return this.runWithRepoLock(slug, () => this.pullRepoUnlocked(repoUrl, slug));
+  }
+
+  private async pullRepoUnlocked(repoUrl: string, slug: string): Promise<RepoOperationResult> {
     try {
-      await this.cloneRepo(repoUrl, slug);
-
-      const [remoteUrl] = this.getRepoBaseUrlAndBranch(repoUrl);
-
       const { dataDir } = this.configuration.get('directories');
       const repoPath = path.join(dataDir, 'repos', slug);
 
       if (!(await this.filesystem.pathExists(repoPath))) {
-        this.logger.info(`Repo ${repoUrl} does not exist`);
-        return { success: false, message: `Repo ${repoUrl} does not exist` };
+        return this.cloneRepoUnlocked(repoUrl, slug);
       }
+
+      const [remoteUrl] = this.getRepoBaseUrlAndBranch(repoUrl);
+
+      if (!remoteUrl) {
+        this.logger.error(`Invalid repo URL: ${repoUrl}`);
+        return { success: false, message: `Invalid repo URL: ${repoUrl}` };
+      }
+
+      await this.ensureDirectoryWithPermissions(path.dirname(repoPath));
 
       this.logger.debug(`Pulling repo ${repoUrl} to ${repoPath}`);
 
@@ -146,9 +227,8 @@ export class ReposHelpers {
         fullname: false,
       });
       if (!currentBranch) {
-        this.logger.warn(`No current branch found for repo ${repoUrl}. Deleting and re-cloning.`);
-        await this.deleteRepo(slug);
-        return this.cloneRepo(repoUrl, slug);
+        this.logger.warn(`No current branch found for repo ${repoUrl}. Re-cloning without deleting the existing cache first.`);
+        return this.replaceRepoWithFreshClone(repoUrl, slug);
       }
       const remoteBranchRef = `origin/${currentBranch}`;
 
@@ -185,11 +265,9 @@ export class ReposHelpers {
 
       this.logger.debug(`Pulled repo ${repoUrl} to ${repoPath}`);
       return { success: true, message: '' };
-    } catch (_) {
-      if (this.configuration.get('__prod__')) {
-        await this.deleteRepo(slug);
-      }
-      return this.cloneRepo(repoUrl, slug);
+    } catch (err) {
+      this.logger.warn(`Failed to update repo ${slug}. Keeping the existing repo cache.`);
+      return this.handleRepoError(err);
     }
   }
 
@@ -197,6 +275,10 @@ export class ReposHelpers {
    * Given a repo id, delete it from the repos folder
    */
   public async deleteRepo(id: string) {
+    return this.runWithRepoLock(id, () => this.deleteRepoUnlocked(id));
+  }
+
+  private async deleteRepoUnlocked(id: string): Promise<RepoOperationResult> {
     try {
       const { dataDir } = this.configuration.get('directories');
       const repoPath = path.join(dataDir, 'repos', id);

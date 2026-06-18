@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import * as Sentry from '@sentry/nestjs';
+import { LATEST_RELEASE_URL } from './common/constants';
 import { execFileAsync } from './common/helpers/exec-helpers';
 import { CacheService, ONE_DAY_IN_SECONDS } from './core/cache/cache.service';
 import { ConfigurationService } from './core/config/configuration.service';
@@ -30,7 +31,7 @@ export class AppService {
     private readonly marketplaceService: MarketplaceService,
     private readonly databaseService: DatabaseService,
     private readonly appLifecycleService: AppLifecycleService,
-    private readonly githubService: GithubService,
+    _githubService: GithubService,
     @Inject(DOCKERODE) private docker: Dockerode,
   ) {}
 
@@ -63,10 +64,11 @@ export class AppService {
 
       await this.marketplaceService.initialize();
 
-      // Every 12 hours, check for updates to the apps repo
-      if (__prod__) {
-        this.repoQueue.publishRepeatable({ command: 'update_all' }, '0 */12 * * *');
-      }
+      // Automatic app store updates are disabled because failed network refreshes
+      // can leave deployments without a local app store cache.
+      // if (__prod__) {
+      //   this.repoQueue.publishRepeatable({ command: 'update_all' }, '0 */12 * * *');
+      // }
       this.systemEventsQueue.publishRepeatable({ command: 'sync_app_statuses' }, '*/5 * * * *');
 
       await this.copyAssets();
@@ -82,24 +84,52 @@ export class AppService {
   }
 
   public async getVersion() {
-    const { version: currentVersion, releaseUrl } = this.configuration.getConfig();
+    const { version: currentVersion } = this.configuration.getConfig();
 
-    // If TIPI_RELEASE_URL is set, use it as the source (supports GitLab URLs).
-    // Otherwise, default to GitHub runtipi/runtipi.
-    const releaseSource = releaseUrl || 'runtipi';
-    const releaseRepo = releaseUrl ? releaseUrl : 'runtipi';
+    try {
+      let version = this.cache.get('latestVersion') ?? '';
+      let body = this.cache.get('latestVersionBody') ?? '';
 
-    const [githubRelease, releasesSince] = await Promise.all([
-      this.githubService.getLatestRelease(releaseSource, releaseRepo),
-      this.githubService.getReleasesSince(releaseSource, releaseRepo, currentVersion),
-    ]);
+      if (!version) {
+        version = currentVersion;
+        // Fetch the latest version in the background
+        (async () => {
+          try {
+            const response = await fetch(LATEST_RELEASE_URL);
+            if (!response.ok) {
+              this.logger.error(`Failed to fetch latest version from GitLab: ${response.statusText}`);
+              return;
+            }
+            const data = await response.json();
+            const release = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+            const tagName = typeof release.tag_name === 'string' ? release.tag_name : '';
+            const description = typeof release.description === 'string' ? release.description : '';
 
-    return {
-      current: currentVersion,
-      latest: githubRelease?.version || currentVersion,
-      body: githubRelease?.body ?? '',
-      releases: releasesSince,
-    };
+            if (!tagName) {
+              this.logger.error(`Unexpected response shape when fetching latest version: ${JSON.stringify(data)}`);
+              return;
+            }
+
+            version = tagName;
+            body = description;
+
+            this.cache.set('latestVersion', version, 60 * 60);
+            this.cache.set('latestVersionBody', body, 60 * 60);
+          } catch (err) {
+            this.logger.error(`Failed to fetch latest version: ${err}`);
+          }
+        })();
+      }
+
+      return { current: currentVersion, latest: version, body };
+    } catch (e) {
+      this.logger.error(e);
+      return {
+        current: currentVersion,
+        latest: currentVersion,
+        body: '',
+      };
+    }
   }
 
   public async copyAssets() {

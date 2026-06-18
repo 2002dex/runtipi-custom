@@ -12,3 +12,4 @@ export const SESSION_COOKIE_MAX_AGE = 1000 * 60 * 60 * 24;
 export const ARCHITECTURES = ['arm64', 'amd64'] as const;
 export type Architecture = (typeof ARCHITECTURES)[number];
 
+export const LATEST_RELEASE_URL = 'https://gitlab.com/api/v4/projects/69082253/releases/permalink/latest';
