@@ -94,10 +94,10 @@ export class SystemService {
           } else {
             // Try to extract from text (fallback)
             const poolMatch = trimmed.match(/\bpool\s*:?\s*([\w-]+)/i);
-            if (poolMatch) zpoolName = zpoolName || poolMatch[1];
+            if (poolMatch) zpoolName = zpoolName || poolMatch[1] || undefined;
             const stateMatch = trimmed.match(/\bstate\s*:?\s*([A-Za-z]+)/i);
             const candidates = ['ONLINE', 'OFFLINE', 'DEGRADED', 'FAULTED', 'SUSPENDED'];
-            let found = stateMatch ? stateMatch[1].toUpperCase() : undefined;
+            let found = stateMatch ? stateMatch[1]?.toUpperCase() : undefined;
             if (!found) {
               for (const c of candidates) {
                 if (trimmed.toUpperCase().includes(c)) { found = c; break; }
@@ -105,7 +105,7 @@ export class SystemService {
             }
             if (found) zpoolHealth = found;
             const capMatch = trimmed.match(/\bcap\s*:?\s*(\d{1,3})%/i) || trimmed.match(/(\d{1,3})%\s*used/i);
-            if (capMatch) zpoolCap = Math.min(100, Math.max(0, Number(capMatch[1])));
+            if (capMatch) zpoolCap = Math.min(100, Math.max(0, Number(capMatch[1] ?? 0)));
           }
         }
       } catch (_) {

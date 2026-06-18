@@ -21,6 +21,10 @@ import {
   UsbAppSelectDto,
   UsbSelectedDto,
   InstalledAppsDto,
+  TimeMachineConfigDto,
+  TimeMachineStatusDto,
+  SmbSharesConfigDto,
+  SmbSharesStatusDto,
 } from './dto/config.dto';
 
 @Controller('config')
@@ -82,6 +86,44 @@ export class ConfigController {
     await this.appLifecycle.restartApp({ appUrn: status.urn });
 
     return SyncResponseDto.parse({ success: true }, { reportOnly: true });
+  }
+
+  @Get('timemachine')
+  @ApiResponse({ type: TimeMachineStatusDto })
+  async getTimeMachineConfig(): Promise<TimeMachineStatusDto> {
+    const res = await this.cfg.getTimeMachineConfig();
+    return TimeMachineStatusDto.parse(res, { reportOnly: true });
+  }
+
+  @Put('timemachine')
+  @ApiResponse({ type: TimeMachineStatusDto })
+  async updateTimeMachineConfig(@Body() body: TimeMachineConfigDto): Promise<TimeMachineStatusDto> {
+    const validatedBody = TimeMachineConfigDto.parse(body, { reportOnly: true });
+    try {
+      const res = await this.cfg.writeTimeMachineConfig(validatedBody);
+      return TimeMachineStatusDto.parse(res, { reportOnly: true });
+    } catch (e: any) {
+      throw new HttpException(e?.message || 'Invalid Time Machine configuration', HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  @Get('smb-shares')
+  @ApiResponse({ type: SmbSharesStatusDto })
+  async getSmbSharesConfig(): Promise<SmbSharesStatusDto> {
+    const res = await this.cfg.getSmbSharesConfig();
+    return SmbSharesStatusDto.parse(res, { reportOnly: true });
+  }
+
+  @Put('smb-shares')
+  @ApiResponse({ type: SmbSharesStatusDto })
+  async updateSmbSharesConfig(@Body() body: SmbSharesConfigDto): Promise<SmbSharesStatusDto> {
+    const validatedBody = SmbSharesConfigDto.parse(body, { reportOnly: true });
+    try {
+      const res = await this.cfg.writeSmbSharesConfig(validatedBody);
+      return SmbSharesStatusDto.parse(res, { reportOnly: true });
+    } catch (e: any) {
+      throw new HttpException(e?.message || 'Invalid SMB shares configuration', HttpStatus.BAD_REQUEST);
+    }
   }
 
   // ===== Duplicates endpoints (file-based state) =====

@@ -159,3 +159,72 @@ export class UsbOpDto extends createArkDto(usbOpSchema, { name: 'UsbOpDto' }) {}
 export class UsbAppSelectDto extends createArkDto(usbAppSelectSchema, { name: 'UsbAppSelectDto', input: true }) {}
 export class UsbSelectedDto extends createArkDto(usbSelectedSchema, { name: 'UsbSelectedDto' }) {}
 export class InstalledAppsDto extends createArkDto(installedAppsSchema, { name: 'InstalledAppsDto' }) {}
+
+/* ---------- Time Machine ---------- */
+const timeMachineConfigSchema = type({
+  enabled: 'boolean',
+  quota: 'string > 0',
+});
+
+const timeMachineStatusSchema = type({
+  enabled: 'boolean',
+  quota: 'string',
+  username: 'string',
+  password: 'string',
+  share: 'string',
+  mountpoint: 'string',
+  status: 'string',
+  message: 'string?',
+  error: 'string?',
+});
+
+export class TimeMachineConfigDto extends createArkDto(timeMachineConfigSchema, { name: 'TimeMachineConfigDto', input: true }) {}
+export class TimeMachineStatusDto extends createArkDto(timeMachineStatusSchema, { name: 'TimeMachineStatusDto' }) {}
+
+/* ---------- SMB Shares ---------- */
+const smbShareSchema = type({
+  name: 'string > 0',
+  quota: 'string > 0',
+  type: 'string?',
+});
+
+const smbSharesConfigSchema = type({
+  enabled: 'boolean',
+  password: 'string?',
+  deleteShares: type('string[]').default(() => []),
+  shares: smbShareSchema.array(),
+});
+
+const smbShareStatusSchema = type({
+  name: 'string',
+  quota: 'string',
+  type: 'string',
+  dataset: 'string',
+  mountpoint: 'string',
+});
+
+const smbQuotaDetailsSchema = type({
+  share: 'string?',
+  dataset: 'string?',
+  requestedQuota: 'string?',
+  currentQuota: 'string?',
+  currentUsed: 'string?',
+  zfsError: 'string?',
+});
+
+const smbSharesStatusSchema = type({
+  enabled: 'boolean',
+  username: 'string',
+  shares: smbShareSchema.array(),
+  appliedShares: smbShareStatusSchema.array(),
+  passwordSet: 'boolean',
+  storageTotalBytes: 'number',
+  storageFreeBytes: 'number',
+  status: 'string',
+  message: 'string?',
+  error: 'string?',
+  quotaDetails: smbQuotaDetailsSchema.optional(),
+});
+
+export class SmbSharesConfigDto extends createArkDto(smbSharesConfigSchema, { name: 'SmbSharesConfigDto', input: true }) {}
+export class SmbSharesStatusDto extends createArkDto(smbSharesStatusSchema, { name: 'SmbSharesStatusDto' }) {}

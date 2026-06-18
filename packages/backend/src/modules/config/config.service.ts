@@ -9,6 +9,22 @@ import fs from 'node:fs';
 
 const STATE_DIR = '/data/state';
 const DEMO_DIR = path.join(process.cwd(), 'json');
+const TIME_MACHINE_DEFAULTS = {
+  enabled: false,
+  quota: '500G',
+  username: 'smadmin',
+  password: 'smadmin',
+  share: 'TimeMachine',
+  mountpoint: '/mnt/timemachine',
+  status: 'not_configured',
+} as const;
+const SMB_SHARES_DEFAULTS = {
+  enabled: false,
+  username: 'smadmin',
+  status: 'not_configured',
+} as const;
+
+type SmbShare = { name: string; quota: string; type: 'macos' | 'windows' };
 
 @Injectable()
 export class ConfigService {
@@ -32,14 +48,14 @@ export class ConfigService {
     return this.getAppStatusByName('jellyfin');
   }
 
-  async getInstalledAppsForUsb() {
+  async getInstalledAppsForUsb(): Promise<{ nextcloud: boolean; jellyfin: boolean; immich: boolean }> {
     const apps = ['nextcloud', 'jellyfin', 'immich'];
     const installed = await this.apps.getInstalledApps();
-    const result: Record<string, boolean> = {};
+    const result = { nextcloud: false, jellyfin: false, immich: false };
     
     for (const appName of apps) {
       const app = installed.find((a) => a?.app?.appName === appName);
-      result[appName] = !!app;
+      result[appName as keyof typeof result] = !!app;
     }
     
     return result;
@@ -110,12 +126,12 @@ export class ConfigService {
         if (m) {
           user = m[2];
           password = m[4];
-          ip = m[5];
+          ip = m[5] ?? '';
         } else {
           // Try to extract just the host/ip from the path
           const simpleMatch = String(pathStr).match(/^rtsp:\/\/(.*?)(\/|$)/);
           if (simpleMatch) {
-            ip = simpleMatch[1];
+            ip = simpleMatch[1] ?? '';
           }
         }
         
@@ -196,6 +212,360 @@ export class ConfigService {
 
     const yamlText = yaml.stringify(finalConfig);
     await this.fs.writeTextFile(filePath, yamlText);
+  }
+
+  private normalizeTimeMachineQuota(quota: string) {
+    const normalized = String(quota || '').trim().toUpperCase();
+    if (!/^[1-9][0-9]*(M|G|T)$/.test(normalized)) {
+      throw new Error('Quota must use a positive size ending in M, G, or T');
+    }
+
+    return normalized;
+  }
+
+  private async readTimeMachineDesiredConfig(): Promise<{ enabled: boolean; quota: string }> {
+    const file = path.join(this.getStateDir(), 'timemachine.json');
+    try {
+      const text = await this.fs.readTextFile(file);
+      const data = JSON.parse(text || 'null');
+      return {
+        enabled: Boolean(data?.enabled),
+        quota: this.normalizeTimeMachineQuota(data?.quota || TIME_MACHINE_DEFAULTS.quota),
+      };
+    } catch {
+      return { enabled: TIME_MACHINE_DEFAULTS.enabled, quota: TIME_MACHINE_DEFAULTS.quota };
+    }
+  }
+
+  private async readTimeMachineStatusFile() {
+    const file = path.join(this.getStateDir(), 'timemachine_status.json');
+    try {
+      const text = await this.fs.readTextFile(file);
+      const data = JSON.parse(text || 'null');
+      if (!data || typeof data !== 'object') return {};
+      return data as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  private async waitForTimeMachineStatus(minMtimeMs: number) {
+    const statusFile = path.join(this.getStateDir(), 'timemachine_status.json');
+    try {
+      await this.waitForStableFile(statusFile, minMtimeMs, { timeoutMs: 4000, pollMs: 500, stableForMs: 500 });
+      return await this.readTimeMachineStatusFile();
+    } catch {
+      return { status: 'pending', message: 'Time Machine configuration update has been queued' };
+    }
+  }
+
+  async getTimeMachineConfig() {
+    const desired = await this.readTimeMachineDesiredConfig();
+    const latestStatus = await this.readTimeMachineStatusFile();
+    return this.buildTimeMachineResponse(desired, latestStatus);
+  }
+
+  async writeTimeMachineConfig(body: { enabled: boolean; quota: string }) {
+    const desired = {
+      enabled: Boolean(body.enabled),
+      quota: this.normalizeTimeMachineQuota(body.quota),
+    };
+
+    const stateDir = this.getStateDir();
+    await this.fs.createDirectory(stateDir);
+
+    const configFile = path.join(stateDir, 'timemachine.json');
+    await this.fs.writeTextFile(configFile, JSON.stringify({ ...desired, updatedAt: new Date().toISOString() }, null, 2));
+
+    let mtimeMs = Date.now();
+    try {
+      const st = await fs.promises.stat(configFile);
+      mtimeMs = st.mtimeMs;
+    } catch {}
+
+    const latestStatus = await this.waitForTimeMachineStatus(mtimeMs);
+    return this.buildTimeMachineResponse(desired, latestStatus);
+  }
+
+  private buildTimeMachineResponse(desired: { enabled: boolean; quota: string }, latestStatus: Record<string, unknown>) {
+    const response: {
+      enabled: boolean;
+      quota: string;
+      username: string;
+      password: string;
+      share: string;
+      mountpoint: string;
+      status: string;
+      message?: string;
+      error?: string;
+    } = {
+      enabled: desired.enabled,
+      quota: desired.quota,
+      username: typeof latestStatus.username === 'string' && latestStatus.username ? latestStatus.username : TIME_MACHINE_DEFAULTS.username,
+      password: typeof latestStatus.password === 'string' && latestStatus.password ? latestStatus.password : TIME_MACHINE_DEFAULTS.password,
+      share: typeof latestStatus.share === 'string' && latestStatus.share ? latestStatus.share : TIME_MACHINE_DEFAULTS.share,
+      mountpoint: typeof latestStatus.mountpoint === 'string' && latestStatus.mountpoint ? latestStatus.mountpoint : TIME_MACHINE_DEFAULTS.mountpoint,
+      status: typeof latestStatus.status === 'string' && latestStatus.status ? latestStatus.status : TIME_MACHINE_DEFAULTS.status,
+    };
+
+    if (typeof latestStatus.message === 'string') {
+      response.message = latestStatus.message;
+    }
+    if (typeof latestStatus.error === 'string') {
+      response.error = latestStatus.error;
+    }
+
+    return response;
+  }
+
+  private normalizeSmbShareType(typeValue: unknown): SmbShare['type'] {
+    const normalized = String(typeValue || 'macos').trim().toLowerCase();
+    if (normalized !== 'macos' && normalized !== 'windows') {
+      throw new Error('Share type must be macos or windows');
+    }
+
+    return normalized;
+  }
+
+  private normalizeSmbShareName(name: unknown) {
+    const normalized = String(name || '').trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(normalized)) {
+      throw new Error('Share name must start with a letter or number and contain only letters, numbers, underscores, and dashes');
+    }
+
+    return normalized;
+  }
+
+  private normalizeSmbShares(shares: Array<{ name: string; quota: string; type?: string }>): SmbShare[] {
+    const seen = new Set<string>();
+    const normalizedShares = (shares || []).map((share) => {
+      const normalized = {
+        name: this.normalizeSmbShareName(share.name),
+        quota: this.normalizeTimeMachineQuota(share.quota),
+        type: this.normalizeSmbShareType(share.type),
+      };
+
+      const key = normalized.name.toLowerCase();
+      if (seen.has(key)) {
+        throw new Error(`Duplicate share name: ${normalized.name}`);
+      }
+      seen.add(key);
+
+      return normalized;
+    });
+
+    return normalizedShares;
+  }
+
+  private quotaToBytes(quota: string) {
+    const normalized = this.normalizeTimeMachineQuota(quota);
+    const value = Number(normalized.slice(0, -1));
+    const unit = normalized.slice(-1);
+    const multiplier = unit === 'T' ? 1024 ** 4 : unit === 'G' ? 1024 ** 3 : 1024 ** 2;
+    return value * multiplier;
+  }
+
+  private async getSmbStorageInfo(): Promise<{ storageTotalBytes: number; storageFreeBytes: number }> {
+    const stateDir = this.getStateDir();
+    const candidates = [
+      path.join(stateDir, 'system_status.tmp'),
+      path.join(stateDir, 'system_status'),
+    ];
+
+    for (const file of candidates) {
+      try {
+        const text = await this.fs.readTextFile(file);
+        const data = JSON.parse(text || 'null');
+        if (data && typeof data === 'object') {
+          const total = Number((data as any).totalSize);
+          const free = Number((data as any).totalFree);
+          if (Number.isFinite(total) && total > 0) {
+            return {
+              storageTotalBytes: total,
+              storageFreeBytes: Number.isFinite(free) && free >= 0 ? free : 0,
+            };
+          }
+        }
+      } catch {
+        // Try the next status file.
+      }
+    }
+
+    return { storageTotalBytes: 0, storageFreeBytes: 0 };
+  }
+
+  private async readSmbSharesDesiredConfig(): Promise<{ enabled: boolean; shares: SmbShare[] }> {
+    const file = path.join(this.getStateDir(), 'shares.json');
+    try {
+      const text = await this.fs.readTextFile(file);
+      const data = JSON.parse(text || 'null');
+      const shares = Array.isArray(data?.shares) ? this.normalizeSmbShares(data.shares) : [];
+      return { enabled: Boolean(data?.enabled), shares };
+    } catch {
+      const timeMachine = await this.readTimeMachineDesiredConfig();
+      if (timeMachine.enabled) {
+        return { enabled: true, shares: [{ name: 'TimeMachine', quota: timeMachine.quota, type: 'macos' }] };
+      }
+
+      return { enabled: SMB_SHARES_DEFAULTS.enabled, shares: [] };
+    }
+  }
+
+  private async readSmbSharesStatusFile() {
+    const file = path.join(this.getStateDir(), 'shares_status.json');
+    try {
+      const text = await this.fs.readTextFile(file);
+      const data = JSON.parse(text || 'null');
+      if (!data || typeof data !== 'object') return {};
+      return data as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  private async waitForSmbSharesStatus(minMtimeMs: number) {
+    const statusFile = path.join(this.getStateDir(), 'shares_status.json');
+    try {
+      await this.waitForStableFile(statusFile, minMtimeMs, { timeoutMs: 4000, pollMs: 500, stableForMs: 500 });
+      return await this.readSmbSharesStatusFile();
+    } catch {
+      return { status: 'saved', message: 'SMB shares saved' };
+    }
+  }
+
+  private async writeJsonFileAtomic(filePath: string, data: unknown) {
+    await this.fs.createDirectory(path.dirname(filePath));
+    const tmpPath = `${filePath}.tmp.${Date.now()}`;
+    await fs.promises.writeFile(tmpPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+    await fs.promises.rename(tmpPath, filePath);
+  }
+
+  async getSmbSharesConfig() {
+    const desired = await this.readSmbSharesDesiredConfig();
+    const latestStatus = await this.readSmbSharesStatusFile();
+    return this.buildSmbSharesResponse(desired, latestStatus, await this.getSmbStorageInfo());
+  }
+
+  async writeSmbSharesConfig(body: { enabled: boolean; password?: string; deleteShares?: string[]; shares: Array<{ name: string; quota: string; type?: string }> }) {
+    const desired = {
+      enabled: Boolean(body.enabled),
+      shares: this.normalizeSmbShares(body.shares || []),
+    };
+    const password = typeof body.password === 'string' ? body.password : '';
+    const deleteShares = Array.from(new Set((body.deleteShares || []).map((name) => this.normalizeSmbShareName(name))));
+    const storage = await this.getSmbStorageInfo();
+
+    if (storage.storageTotalBytes > 0) {
+      const requestedBytes = desired.shares.reduce((sum, share) => sum + this.quotaToBytes(share.quota), 0);
+      if (requestedBytes > storage.storageTotalBytes) {
+        throw new Error('Total share quotas cannot be greater than total disk space');
+      }
+    }
+
+    const payload: { enabled: boolean; username: string; shares: SmbShare[]; password?: string; deleteShares?: string[]; updatedAt: string } = {
+      enabled: desired.enabled,
+      username: SMB_SHARES_DEFAULTS.username,
+      shares: desired.shares,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (password.trim()) {
+      payload.password = password;
+    }
+    if (deleteShares.length > 0) {
+      payload.deleteShares = deleteShares;
+    }
+
+    const configFile = path.join(this.getStateDir(), 'shares.json');
+    await this.writeJsonFileAtomic(configFile, payload);
+
+    let mtimeMs = Date.now();
+    try {
+      const st = await fs.promises.stat(configFile);
+      mtimeMs = st.mtimeMs;
+    } catch {}
+
+    const appliedStatus = await this.waitForSmbSharesStatus(mtimeMs);
+    return this.buildSmbSharesResponse(desired, appliedStatus, storage);
+  }
+
+  private buildSmbSharesResponse(desired: { enabled: boolean; shares: SmbShare[] }, latestStatus: Record<string, unknown>, storage: { storageTotalBytes: number; storageFreeBytes: number }) {
+    const statusAppliedShares = Array.isArray(latestStatus.appliedShares)
+      ? latestStatus.appliedShares
+          .filter((share: any) => share && typeof share === 'object')
+          .map((share: any) => ({
+            name: typeof share.name === 'string' ? share.name : '',
+            quota: typeof share.quota === 'string' ? share.quota : '',
+            type: typeof share.type === 'string' ? share.type : 'macos',
+            dataset: typeof share.dataset === 'string' ? share.dataset : '',
+            mountpoint: typeof share.mountpoint === 'string' ? share.mountpoint : '',
+          }))
+          .filter((share) => share.name && share.quota && share.dataset && share.mountpoint)
+      : [];
+    const appliedByName = new Map(statusAppliedShares.map((share) => [share.name.toLowerCase(), share]));
+    const appliedShares = desired.enabled
+      ? desired.shares.map((share) => {
+          const applied = appliedByName.get(share.name.toLowerCase());
+          if (applied) return applied;
+
+          const slug = share.name.toLowerCase();
+          return {
+            ...share,
+            dataset: `mypool/backup/${slug}`,
+            mountpoint: `/mnt/${slug}`,
+          };
+        })
+      : [];
+
+    const response: {
+      enabled: boolean;
+      username: string;
+      shares: SmbShare[];
+      appliedShares: Array<{ name: string; quota: string; type: string; dataset: string; mountpoint: string }>;
+      passwordSet: boolean;
+      storageTotalBytes: number;
+      storageFreeBytes: number;
+      status: string;
+      message?: string;
+      error?: string;
+      quotaDetails?: {
+        share?: string;
+        dataset?: string;
+        requestedQuota?: string;
+        currentQuota?: string;
+        currentUsed?: string;
+        zfsError?: string;
+      };
+    } = {
+      enabled: desired.enabled,
+      username: SMB_SHARES_DEFAULTS.username,
+      shares: desired.shares,
+      appliedShares,
+      passwordSet: latestStatus.passwordSet === true,
+      storageTotalBytes: storage.storageTotalBytes,
+      storageFreeBytes: storage.storageFreeBytes,
+      status: typeof latestStatus.status === 'string' && latestStatus.status ? latestStatus.status : SMB_SHARES_DEFAULTS.status,
+    };
+
+    if (typeof latestStatus.message === 'string') {
+      response.message = latestStatus.message;
+    }
+    if (typeof latestStatus.error === 'string') {
+      response.error = latestStatus.error;
+    }
+    if (latestStatus.quotaDetails && typeof latestStatus.quotaDetails === 'object' && !Array.isArray(latestStatus.quotaDetails)) {
+      const details = latestStatus.quotaDetails as Record<string, unknown>;
+      response.quotaDetails = {
+        share: typeof details.share === 'string' ? details.share : undefined,
+        dataset: typeof details.dataset === 'string' ? details.dataset : undefined,
+        requestedQuota: typeof details.requestedQuota === 'string' ? details.requestedQuota : undefined,
+        currentQuota: typeof details.currentQuota === 'string' ? details.currentQuota : undefined,
+        currentUsed: typeof details.currentUsed === 'string' ? details.currentUsed : undefined,
+        zfsError: typeof details.zfsError === 'string' ? details.zfsError : undefined,
+      };
+    }
+
+    return response;
   }
 
   // ====== Duplicates helpers (file-based state) ======
@@ -591,7 +961,7 @@ export class ConfigService {
     }
   }
 
-  async scanUsbDevices(): Promise<{ devices: Array<{ device: string; model?: string | null; size?: string | null; mountpoint?: string | null; uuid?: string | null; label?: string | null }>; error?: string }> {
+  async scanUsbDevices(): Promise<{ devices: Array<{ device: string; model: string | null; size: string | null; mountpoint: string | null; uuid: string | null; label: string | null }>; error?: string }> {
     const { mtimeMs } = await this.writeCommand('scan');
 
     const usbList = path.join(this.getStateDir(), 'usb_list.json');

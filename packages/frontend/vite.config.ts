@@ -21,9 +21,6 @@ if (NODE_ENV === 'production') {
       },
       org: 'dspworks',
       project: 'javascript-react',
-      telemetry: false,
-      sourcemapPathStrip: 'packages/frontend/',
-      errorHandler: 'warn',
     }) as PluginOption,
   );
 }

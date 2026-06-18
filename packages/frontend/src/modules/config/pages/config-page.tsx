@@ -5,9 +5,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 import { useNavigate, useSearchParams } from 'react-router';
+import { useAuthenticatedFetch } from '@/lib/hooks/use-authenticated-fetch';
+import toast from 'react-hot-toast';
 
 function DuplicatesTab() {
   const { t } = useTranslation();
+  const authenticatedFetch = useAuthenticatedFetch();
   const [users, setUsers] = useState<string[]>([]);
   const [usersLoading, setUsersLoading] = useState<boolean>(true);
   const [selectedUser, setSelectedUser] = useState<string>('');
@@ -23,7 +26,7 @@ function DuplicatesTab() {
   useEffect(() => {
     const loadUsers = async () => {
       try {
-        const res = await fetch('/api/config/nextcloud/users');
+        const res = await authenticatedFetch('/api/config/nextcloud/users');
         const data = await res.json();
         setUsers(data.users || []);
       } catch (e: any) {
@@ -33,13 +36,13 @@ function DuplicatesTab() {
       }
     };
     void loadUsers();
-  }, []);
+  }, [authenticatedFetch]);
 
   const refreshEntries = async () => {
     setResultLoading(true);
     setDupError('');
     try {
-      const res = await fetch('/api/config/duplicates/rmlint');
+      const res = await authenticatedFetch('/api/config/duplicates/rmlint');
       const data = await res.json();
       const newEntries = data.entries || [];
       setEntries(newEntries);
@@ -72,7 +75,7 @@ function DuplicatesTab() {
     setShowingSelected(false);
     try {
       // Overwrite path.txt with the selected user's path and persist username
-      await fetch('/api/config/duplicates/set-user', {
+      await authenticatedFetch('/api/config/duplicates/set-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: selectedUser }),
@@ -94,14 +97,17 @@ function DuplicatesTab() {
     }
   };
 
-  const selectedItems = Object.entries(selected).filter(([, v]) => v).map(([k]) => Number(k)).map((i) => entries[i]);
+  const selectedItems = Object.entries(selected)
+    .filter(([, v]) => v)
+    .map(([k]) => entries[Number(k)])
+    .filter((entry): entry is { path: string; type: string; is_original?: boolean } => Boolean(entry));
 
   const handleWriteSelection = async () => {
     if (selectedItems.length === 0) return;
     setDupError('');
     setDupSuccess('');
     try {
-      const res = await fetch('/api/config/duplicates/selected', {
+      const res = await authenticatedFetch('/api/config/duplicates/selected', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ selected: selectedItems }),
@@ -151,49 +157,49 @@ function DuplicatesTab() {
         <div>Reading data...</div>
       ) : (
         <div>
-            <div className="d-flex align-items-center justify-content-between mb-2">
-              <h5 className="m-0">{t('CONFIG_DUPLICATES_RESULTS_TITLE')}</h5>
-              <div className="d-flex gap-2">
-                {!showingSelected ? (
-                  <>
-                    <Button intent="primary" onClick={handleWriteSelection} disabled={Object.values(selected).filter(Boolean).length === 0}>Done</Button>
-                    <Button
-                      intent="ghost"
-                      onClick={() => {
-                        // Reset entire duplicates form so a different user can be selected
-                        setSelected({});
-                        setEntries([]);
-                        setShowingSelected(false);
-                        setSelectedUser('');
-                        setHasRunFind(false);
-                        setDupError('');
-                        setDupSuccess('');
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                ) : (
-                  <Button intent="warning" onClick={async () => {
-                    try {
-                      const res = await fetch('/api/config/duplicates/remove-all', { method: 'POST' });
-                      if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-                      setDupSuccess('Files removed successfully');
-                      // reset form back to Nextcloud user selection
-                      setEntries([]);
+          <div className="d-flex align-items-center justify-content-between mb-2">
+            <h5 className="m-0">{t('CONFIG_DUPLICATES_RESULTS_TITLE')}</h5>
+            <div className="d-flex gap-2">
+              {!showingSelected ? (
+                <>
+                  <Button intent="primary" onClick={handleWriteSelection} disabled={Object.values(selected).filter(Boolean).length === 0}>Done</Button>
+                  <Button
+                    intent="default"
+                    onClick={() => {
+                      // Reset entire duplicates form so a different user can be selected
                       setSelected({});
+                      setEntries([]);
                       setShowingSelected(false);
                       setSelectedUser('');
                       setHasRunFind(false);
-                    } catch (e: any) {
-                      setDupError(String(e));
-                    }
-                  }}>
-                    Confirm Deletion
+                      setDupError('');
+                      setDupSuccess('');
+                    }}
+                  >
+                    Cancel
                   </Button>
-                )}
-              </div>
+                </>
+              ) : (
+                <Button intent="warning" onClick={async () => {
+                  try {
+                    const res = await authenticatedFetch('/api/config/duplicates/remove-all', { method: 'POST' });
+                    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+                    setDupSuccess('Files removed successfully');
+                    // reset form back to Nextcloud user selection
+                    setEntries([]);
+                    setSelected({});
+                    setShowingSelected(false);
+                    setSelectedUser('');
+                    setHasRunFind(false);
+                  } catch (e: any) {
+                    setDupError(String(e));
+                  }
+                }}>
+                  Confirm Deletion
+                </Button>
+              )}
             </div>
+          </div>
           {!showingSelected && (
             <div className="mb-2 text-muted">
               {t('CONFIG_DUPLICATES_SUMMARY', { count: Object.values(selected).filter(Boolean).length })}
@@ -273,12 +279,57 @@ interface Camera {
   inputs?: CameraInput[];
 }
 
+interface SmbShare {
+  name: string;
+  quota: string;
+  type: 'macos' | 'windows';
+  uiId?: string;
+}
+
+interface SmbAppliedShare extends SmbShare {
+  dataset: string;
+  mountpoint: string;
+}
+
+interface SmbSharesStatus {
+  enabled: boolean;
+  username: string;
+  shares: SmbShare[];
+  appliedShares: SmbAppliedShare[];
+  passwordSet: boolean;
+  storageTotalBytes: number;
+  storageFreeBytes: number;
+  status: string;
+  message?: string;
+  error?: string;
+  quotaDetails?: {
+    share?: string;
+    dataset?: string;
+    requestedQuota?: string;
+    currentQuota?: string;
+    currentUsed?: string;
+    zfsError?: string;
+  };
+}
+
+const SMB_SHARES_DEFAULTS: SmbSharesStatus = {
+  enabled: false,
+  username: 'smadmin',
+  shares: [],
+  appliedShares: [],
+  passwordSet: false,
+  storageTotalBytes: 0,
+  storageFreeBytes: 0,
+  status: 'not_configured',
+};
+
 export default function ConfigPage() {
   const { t } = useTranslation();
+  const authenticatedFetch = useAuthenticatedFetch();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [currentTab, setCurrentTab] = React.useState(searchParams.get('tab') || 'info');
-  
+
   // Info
   const [internalIp, setInternalIp] = useState<string>('');
 
@@ -289,13 +340,22 @@ export default function ConfigPage() {
   // Jellyfin Sync
   const [jellyfinInstalled, setJellyfinInstalled] = useState<boolean>(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState<boolean>(false);
+  const smbRowIdRef = React.useRef(0);
+  const smbNewRowIdRef = React.useRef('smb-share-new');
   const [loading, setLoading] = useState<boolean>(true);
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<number, { name?: string; inputs?: string }>>({});
-  
+  const [smbShares, setSmbShares] = useState<SmbSharesStatus>(SMB_SHARES_DEFAULTS);
+  const [smbPassword, setSmbPassword] = useState<string>('');
+  const [smbDeleteShares, setSmbDeleteShares] = useState<string[]>([]);
+  const [smbSaving, setSmbSaving] = useState<boolean>(false);
+  const [smbError, setSmbError] = useState<string>('');
+  const [smbSuccess, setSmbSuccess] = useState<string>('');
+  const [smbDeleteTarget, setSmbDeleteTarget] = useState<SmbShare | null>(null);
+
   // Objects dropdown states
   const [objectsDropdownOpen, setObjectsDropdownOpen] = useState<Record<number, boolean>>({});
   const [objectsSearchTerm, setObjectsSearchTerm] = useState<Record<number, string>>({});
@@ -334,36 +394,88 @@ export default function ConfigPage() {
     };
   }, []);
 
+  const extractZfsError = (errorStr: string, quotaDetails?: SmbSharesStatus['quotaDetails']): string => {
+    if (quotaDetails?.zfsError) {
+      return quotaDetails.zfsError;
+    }
+    if (!errorStr) return '';
+    try {
+      const parsed = JSON.parse(errorStr);
+      if (parsed) {
+        if (parsed.quotaDetails?.zfsError) {
+          return parsed.quotaDetails.zfsError;
+        }
+        if (parsed.zfsError) {
+          return parsed.zfsError;
+        }
+        if (parsed.error) {
+          return typeof parsed.error === 'string' ? parsed.error : (parsed.error.message || JSON.stringify(parsed.error));
+        }
+        if (parsed.message) {
+          return parsed.message;
+        }
+      }
+    } catch {
+      // Not a JSON string
+    }
+    return errorStr;
+  };
+
+  useEffect(() => {
+    if (smbError) {
+      const zfsErrMsg = extractZfsError(smbError);
+      if (zfsErrMsg) {
+        toast.error(zfsErrMsg);
+      }
+      setSmbError('');
+    }
+  }, [smbError]);
+
+  useEffect(() => {
+    if (smbShares.error) {
+      const zfsErrMsg = extractZfsError(smbShares.error, smbShares.quotaDetails);
+      if (zfsErrMsg) {
+        toast.error(zfsErrMsg);
+      }
+      setSmbShares((prev) => ({ ...prev, error: undefined, quotaDetails: undefined }));
+    }
+  }, [smbShares.error, smbShares.quotaDetails]);
+
   useEffect(() => {
     const load = async () => {
       try {
-        const info = await fetch('/api/config/info').then((r) => r.json());
+        const info = await authenticatedFetch('/api/config/info').then((r) => r.json());
         setInternalIp(info.internalIp || '');
 
-        const status = await fetch('/api/config/frigate/status').then((r) => r.json());
+        const status = await authenticatedFetch('/api/config/frigate/status').then((r) => r.json());
         setFrigateInstalled(Boolean(status.installed));
 
-        const jf = await fetch('/api/config/jellyfin/status').then((r) => r.json());
+        const jf = await authenticatedFetch('/api/config/jellyfin/status').then((r) => r.json());
         setJellyfinInstalled(Boolean(jf.installed));
 
+        const shares = await authenticatedFetch('/api/config/smb-shares').then((r) => r.json());
+        const loadedShares = (shares.shares || []).map((share: SmbShare) => ({ ...share, uiId: `smb-share-${smbRowIdRef.current++}` }));
+        setSmbShares({ ...SMB_SHARES_DEFAULTS, ...shares, shares: loadedShares, appliedShares: shares.appliedShares || [] });
+        setSmbDeleteShares([]);
+
         if (status.installed) {
-          const cfg = await fetch('/api/config/frigate/config').then((r) => r.json());
+          const cfg = await authenticatedFetch('/api/config/frigate/config').then((r) => r.json());
           const loadedCameras = (cfg?.cameras || []).map((camera: any) => ({
             ...camera,
             // Ensure inputs array exists and has at least one input; normalize roles to lowercase
-            inputs: camera.inputs && camera.inputs.length > 0 
+            inputs: camera.inputs && camera.inputs.length > 0
               ? camera.inputs.map((i: any) => ({
-                  path: i?.path || '',
-                  roles: Array.isArray(i?.roles) 
-                    ? i.roles.map((r: any) => String(r).toLowerCase()) 
-                    : []
-                })) 
-              : 
+                path: i?.path || '',
+                roles: Array.isArray(i?.roles)
+                  ? i.roles.map((r: any) => String(r).toLowerCase())
+                  : []
+              }))
+              :
               // If no inputs but we have legacy ip, create a backward-compatible input
               camera.ip ? [{
-                path: camera.user && camera.password 
+                path: camera.user && camera.password
                   ? `rtsp://${encodeURIComponent(camera.user)}:${encodeURIComponent(camera.password)}@${camera.ip}`
-                  : camera.user 
+                  : camera.user
                     ? `rtsp://${encodeURIComponent(camera.user)}@${camera.ip}`
                     : `rtsp://${camera.ip}`,
                 roles: ['detect', ...(camera.record !== false ? ['record'] : [])]
@@ -381,8 +493,8 @@ export default function ConfigPage() {
     };
 
     void load();
-  }, []);
-  
+  }, [authenticatedFetch]);
+
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -391,27 +503,27 @@ export default function ConfigPage() {
         setObjectsDropdownOpen({});
       }
     };
-    
+
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
-  const addCamera = () => setCameras((prev) => [...prev, { 
-    name: '', 
-    ip: '', 
-    user: '', 
-    password: '', 
+  const addCamera = () => setCameras((prev) => [...prev, {
+    name: '',
+    ip: '',
+    user: '',
+    password: '',
     objects: ['person'], // Default to person
-    record: true, 
+    record: true,
     inputs: [{ path: '', roles: ['detect'] }]
   }]);
-  
+
   const removeCamera = (idx: number) => setCameras((prev) => prev.filter((_, i) => i !== idx));
 
   const updateCamera = (idx: number, key: keyof Camera, value: any) => {
     setCameras((prev) => prev.map((c, i) => (i === idx ? { ...c, [key]: value } : c)));
   };
-  
+
   // Objects dropdown functions
   const toggleObjectsDropdown = (cameraIdx: number) => {
     setObjectsDropdownOpen(prev => ({
@@ -419,61 +531,61 @@ export default function ConfigPage() {
       [cameraIdx]: !prev[cameraIdx]
     }));
   };
-  
+
   const updateObjectsSearch = (cameraIdx: number, searchTerm: string) => {
     setObjectsSearchTerm(prev => ({
       ...prev,
       [cameraIdx]: searchTerm
     }));
   };
-  
+
   const toggleObjectSelection = (cameraIdx: number, object: string) => {
     const currentObjects = cameras[cameraIdx]?.objects || [];
     const isSelected = currentObjects.includes(object);
-    
-    const newObjects = isSelected 
+
+    const newObjects = isSelected
       ? currentObjects.filter(obj => obj !== object)
       : [...currentObjects, object];
-    
+
     updateCamera(cameraIdx, 'objects', newObjects);
   };
-  
+
   const getFilteredObjects = (cameraIdx: number) => {
     const searchTerm = objectsSearchTerm[cameraIdx] || '';
-    return FRIGATE_OBJECTS.filter(obj => 
+    return FRIGATE_OBJECTS.filter(obj =>
       obj.toLowerCase().includes(searchTerm.toLowerCase())
     );
   };
-  
+
   const updateInput = (cameraIdx: number, inputIdx: number, field: 'path' | 'roles', value: any) => {
-    setCameras((prev) => prev.map((c, i) => 
-      i === cameraIdx 
-        ? { 
-            ...c, 
-            inputs: (c.inputs || []).map((input, j) => 
-              j === inputIdx ? { ...input, [field]: value } : input
-            )
-          }
+    setCameras((prev) => prev.map((c, i) =>
+      i === cameraIdx
+        ? {
+          ...c,
+          inputs: (c.inputs || []).map((input, j) =>
+            j === inputIdx ? { ...input, [field]: value } : input
+          )
+        }
         : c
     ));
   };
-  
+
   const updateInputRoles = (cameraIdx: number, inputIdx: number, role: string, checked: boolean) => {
-    setCameras((prev) => prev.map((c, i) => 
-      i === cameraIdx 
-        ? { 
-            ...c, 
-            inputs: (c.inputs || []).map((input, j) => 
-              j === inputIdx 
-                ? { 
-                    ...input, 
-                    roles: checked 
-                      ? [...(input.roles || []), role]
-                      : (input.roles || []).filter(r => r !== role)
-                  }
-                : input
-            )
-          }
+    setCameras((prev) => prev.map((c, i) =>
+      i === cameraIdx
+        ? {
+          ...c,
+          inputs: (c.inputs || []).map((input, j) =>
+            j === inputIdx
+              ? {
+                ...input,
+                roles: checked
+                  ? [...(input.roles || []), role]
+                  : (input.roles || []).filter(r => r !== role)
+              }
+              : input
+          )
+        }
         : c
     ));
   };
@@ -481,27 +593,27 @@ export default function ConfigPage() {
   const validateCameras = () => {
     const errors: Record<number, { name?: string; inputs?: string }> = {};
     let hasErrors = false;
-    
+
     cameras.forEach((camera, idx) => {
       const cameraErrors: { name?: string; inputs?: string } = {};
-      
+
       if (!camera.name.trim()) {
         cameraErrors.name = t('APP_INSTALL_FORM_ERROR_REQUIRED', { label: t('CONFIG_FRIGATE_CAMERA_NAME_LABEL') });
         hasErrors = true;
       }
-      
+
       // Require at least one non-empty input path (full RTSP URL)
       const hasPath = (camera.inputs || []).some(inp => (inp.path || '').trim().length > 0);
       if (!hasPath) {
         cameraErrors.inputs = t('APP_INSTALL_FORM_ERROR_REQUIRED', { label: t('CONFIG_FRIGATE_CAMERA_INPUT_PATH_LABEL') });
         hasErrors = true;
       }
-      
+
       if (Object.keys(cameraErrors).length > 0) {
         errors[idx] = cameraErrors;
       }
     });
-    
+
     setValidationErrors(errors);
     return !hasErrors;
   };
@@ -518,7 +630,7 @@ export default function ConfigPage() {
     setError('');
     setValidationErrors({});
     try {
-      const res = await fetch('/api/config/frigate/config', {
+      const res = await authenticatedFetch('/api/config/frigate/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cameras }),
@@ -533,6 +645,138 @@ export default function ConfigPage() {
     }
   };
 
+  const quotaToBytes = (quota: string) => {
+    const normalized = quota.trim().toUpperCase();
+    const match = normalized.match(/^([1-9][0-9]*)(M|G|T)$/);
+    if (!match) return Number.NaN;
+    const value = Number(match[1]);
+    const unit = match[2];
+    const multiplier = unit === 'T' ? 1024 ** 4 : unit === 'G' ? 1024 ** 3 : 1024 ** 2;
+    return value * multiplier;
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes || bytes <= 0) return t('CONFIG_SMB_STORAGE_UNKNOWN');
+    if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(1)} TB`;
+    return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  };
+
+
+  const getQuotaValidationError = (shares: SmbShare[]) => {
+    if (smbShares.storageTotalBytes <= 0) return '';
+    const totalRequested = shares.reduce((sum, share) => {
+      const bytes = quotaToBytes(share.quota);
+      return Number.isFinite(bytes) ? sum + bytes : sum;
+    }, 0);
+    if (totalRequested > smbShares.storageTotalBytes) {
+      return t('CONFIG_SMB_QUOTA_EXCEEDS_TOTAL');
+    }
+    return '';
+  };
+
+  const normalizeSmbSharesForSave = () => smbShares.shares
+    .map((share) => ({
+      name: share.name.trim(),
+      quota: share.quota.trim().toUpperCase(),
+      type: share.type,
+    }))
+    .filter((share) => share.name || share.quota !== '500G');
+
+  const validateSmbShares = (shares: SmbShare[]) => {
+    const seen = new Set<string>();
+    const namePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
+    const quotaPattern = /^[1-9][0-9]*(M|G|T)$/;
+
+    for (const share of shares) {
+      if (!namePattern.test(share.name)) {
+        throw new Error(t('CONFIG_SMB_SHARE_NAME_INVALID'));
+      }
+      if (!quotaPattern.test(share.quota)) {
+        throw new Error(t('CONFIG_SMB_SHARE_QUOTA_INVALID'));
+      }
+      if (share.type !== 'macos' && share.type !== 'windows') {
+        throw new Error(t('CONFIG_SMB_SHARE_TYPE_INVALID'));
+      }
+
+      const key = share.name.toLowerCase();
+      if (seen.has(key)) {
+        throw new Error(t('CONFIG_SMB_SHARE_NAME_DUPLICATE'));
+      }
+      seen.add(key);
+    }
+
+    const quotaError = getQuotaValidationError(shares);
+    if (quotaError) throw new Error(quotaError);
+  };
+
+  const saveSmbSharesConfig = async () => {
+    setSmbSaving(true);
+    setSmbError('');
+    setSmbSuccess('');
+    try {
+      const nextShares = normalizeSmbSharesForSave();
+      validateSmbShares(nextShares);
+
+      const payload: { enabled: boolean; shares: SmbShare[]; password?: string; deleteShares?: string[] } = { enabled: smbShares.enabled, shares: nextShares };
+      if (smbPassword.trim()) payload.password = smbPassword;
+      if (smbDeleteShares.length > 0) payload.deleteShares = smbDeleteShares;
+
+      const res = await authenticatedFetch('/api/config/smb-shares', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || `Request failed: ${res.status}`);
+      const savedShares = (data.shares || []).map((share: SmbShare) => ({ ...share, uiId: `smb-share-${smbRowIdRef.current++}` }));
+      setSmbShares({ ...SMB_SHARES_DEFAULTS, ...data, shares: savedShares, appliedShares: data.appliedShares || [] });
+      if (data?.status === 'error' || data?.error) {
+        return false;
+      }
+      setSmbPassword('');
+      setSmbDeleteShares([]);
+      setSmbSuccess(t('CONFIG_SMB_SHARES_SAVED'));
+      return true;
+    } catch (e: any) {
+      setSmbError(String(e?.message || e));
+      return false;
+    } finally {
+      setSmbSaving(false);
+    }
+  };
+
+  const removeSmbShare = (name: string) => {
+    const normalizedName = name.trim();
+    setSmbShares((prev) => ({
+      ...prev,
+      shares: prev.shares.filter((share) => share.name !== name),
+    }));
+    if (normalizedName) {
+      setSmbDeleteShares((prev) => Array.from(new Set([...prev, normalizedName])));
+    }
+  };
+
+  const toggleSmbEnabled = (enabled: boolean) => {
+    setSmbError('');
+    setSmbSuccess('');
+    setSmbShares((prev) => ({ ...prev, enabled }));
+  };
+
+  const updateSmbShareRow = (index: number, key: keyof SmbShare, value: string) => {
+    setSmbShares((prev) => {
+      const shares = [...prev.shares];
+      if (!shares[index]) {
+        shares[index] = { name: '', quota: '500G', type: 'macos', uiId: smbNewRowIdRef.current };
+        smbNewRowIdRef.current = `smb-share-new-${smbRowIdRef.current++}`;
+      }
+      const nextValue = key === 'quota' ? value.toUpperCase() : value;
+      shares[index] = { ...shares[index], [key]: nextValue } as SmbShare;
+      return { ...prev, shares };
+    });
+  };
+
+  const smbShareRows = [...smbShares.shares, { name: '', quota: '500G', type: 'macos' as const, uiId: smbNewRowIdRef.current }];
+
   return (
     <div className="card d-flex">
       <Tabs value={currentTab}>
@@ -545,6 +789,9 @@ export default function ConfigPage() {
           </TabsTrigger>
           <TabsTrigger onClick={() => { setCurrentTab('sync'); navigate(`?tab=sync`, { replace: true }); }} value="sync">
             {t('CONFIG_SYNC_TAB_TITLE')}
+          </TabsTrigger>
+          <TabsTrigger onClick={() => { setCurrentTab('timemachine'); navigate(`?tab=timemachine`, { replace: true }); }} value="timemachine">
+            {t('CONFIG_SMB_SHARES_TAB_TITLE')}
           </TabsTrigger>
           <TabsTrigger onClick={() => { setCurrentTab('duplicates'); navigate(`?tab=duplicates`, { replace: true }); }} value="duplicates">
             {t('CONFIG_DUPLICATES_TAB_TITLE')}
@@ -568,224 +815,223 @@ export default function ConfigPage() {
           {frigateInstalled ? (
             <div className="card p-3">
               <form onSubmit={onSubmit}>
-            {error && (
-              <div className="alert alert-danger" role="alert">
-                {error}
-              </div>
-            )}
-            {success && (
-              <div className="alert alert-success" role="alert">
-                {success}
-              </div>
-            )}
+                {error && (
+                  <div className="alert alert-danger" role="alert">
+                    {error}
+                  </div>
+                )}
+                {success && (
+                  <div className="alert alert-success" role="alert">
+                    {success}
+                  </div>
+                )}
 
-            <div className="d-flex align-items-center justify-content-between mb-2">
-              <h4 className="m-0">{t('CONFIG_FRIGATE_CAMERAS_TITLE')}</h4>
-              <button type="button" className="btn btn-sm btn-primary" onClick={addCamera}>
-                {t('CONFIG_FRIGATE_ADD_CAMERA')}
-              </button>
-            </div>
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <h4 className="m-0">{t('CONFIG_FRIGATE_CAMERAS_TITLE')}</h4>
+                  <button type="button" className="btn btn-sm btn-primary" onClick={addCamera}>
+                    {t('CONFIG_FRIGATE_ADD_CAMERA')}
+                  </button>
+                </div>
 
-            {cameras.map((cam, idx) => (
-              <div key={idx} className="card mb-3 p-3">
-                <div className="row g-2">
-                  <div className="col-md-3">
-                    <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_NAME_LABEL')}</label>
-                    <input 
-                      className={`form-control ${validationErrors[idx]?.name ? 'is-invalid' : ''}`} 
-                      value={cam.name} 
-                      onChange={(e) => updateCamera(idx, 'name', e.target.value)} 
-                      required 
-                    />
-                    {validationErrors[idx]?.name && (
-                      <div className="invalid-feedback">{validationErrors[idx].name}</div>
-                    )}
-                  </div>
-                  <div className="col-md-3">
-                    <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_IP_LABEL')}</label>
-                    <input 
-                      className={`form-control`} 
-                      value={cam.ip} 
-                      onChange={(e) => updateCamera(idx, 'ip', e.target.value)} 
-                    />
-                  </div>
-                  <div className="col-md-3">
-                    <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_USER_LABEL')}</label>
-                    <input className="form-control" value={cam.user || ''} onChange={(e) => updateCamera(idx, 'user', e.target.value)} />
-                  </div>
-                  <div className="col-md-3">
-                    <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_PASSWORD_LABEL')}</label>
-                    <input className="form-control" type="password" value={cam.password || ''} onChange={(e) => updateCamera(idx, 'password', e.target.value)} />
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_OBJECTS_LABEL')}</label>
-                    <div className="position-relative objects-dropdown">
-                      <div 
-                        className="form-control d-flex flex-wrap gap-1 cursor-pointer" 
-                        onClick={() => toggleObjectsDropdown(idx)}
-                        style={{ minHeight: '38px', cursor: 'pointer' }}
-                      >
-                        {(cam.objects || []).length > 0 ? (
-                          (cam.objects || []).map(obj => (
-                            <span key={obj} className="badge bg-primary text-white d-flex align-items-center gap-1">
-                              {obj}
-                              <button 
-                                type="button" 
-                                className="btn-close btn-close-white" 
-                                style={{ fontSize: '0.65em' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleObjectSelection(idx, obj);
-                                }}
-                              ></button>
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-muted">Select objects to detect...</span>
+                {cameras.map((cam, idx) => (
+                  <div key={idx} className="card mb-3 p-3">
+                    <div className="row g-2">
+                      <div className="col-md-3">
+                        <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_NAME_LABEL')}</label>
+                        <input
+                          className={`form-control ${validationErrors[idx]?.name ? 'is-invalid' : ''}`}
+                          value={cam.name}
+                          onChange={(e) => updateCamera(idx, 'name', e.target.value)}
+                          required
+                        />
+                        {validationErrors[idx]?.name && (
+                          <div className="invalid-feedback">{validationErrors[idx].name}</div>
                         )}
                       </div>
-                      
-                      {objectsDropdownOpen[idx] && (
-                        <div className={`position-absolute w-100 border border-top-0 shadow-sm objects-menu ${isDarkMode ? 'bg-dark' : 'bg-white'}`} 
-                             style={{ 
-                               zIndex: 1000, 
-                               maxHeight: '200px', 
-                               overflowY: 'auto'
-                             }}>
-                          <div className="p-2 border-bottom" style={{ borderColor: 'var(--bs-border-color)' }}>
-                            <input 
-                              className="form-control form-control-sm"
-                              placeholder="Search objects..."
-                              value={objectsSearchTerm[idx] || ''}
-                              onChange={(e) => updateObjectsSearch(idx, e.target.value)}
-                              onClick={(e) => e.stopPropagation()}
-                            />
+                      <div className="col-md-3">
+                        <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_IP_LABEL')}</label>
+                        <input
+                          className={`form-control`}
+                          value={cam.ip}
+                          onChange={(e) => updateCamera(idx, 'ip', e.target.value)}
+                        />
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_USER_LABEL')}</label>
+                        <input className="form-control" value={cam.user || ''} onChange={(e) => updateCamera(idx, 'user', e.target.value)} />
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_PASSWORD_LABEL')}</label>
+                        <input className="form-control" type="password" value={cam.password || ''} onChange={(e) => updateCamera(idx, 'password', e.target.value)} />
+                      </div>
+                      <div className="col-md-6">
+                        <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_OBJECTS_LABEL')}</label>
+                        <div className="position-relative objects-dropdown">
+                          <div
+                            className="form-control d-flex flex-wrap gap-1 cursor-pointer"
+                            onClick={() => toggleObjectsDropdown(idx)}
+                            style={{ minHeight: '38px', cursor: 'pointer' }}
+                          >
+                            {(cam.objects || []).length > 0 ? (
+                              (cam.objects || []).map(obj => (
+                                <span key={obj} className="badge bg-primary text-white d-flex align-items-center gap-1">
+                                  {obj}
+                                  <button
+                                    type="button"
+                                    className="btn-close btn-close-white"
+                                    style={{ fontSize: '0.65em' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleObjectSelection(idx, obj);
+                                    }}
+                                  ></button>
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-muted">Select objects to detect...</span>
+                            )}
                           </div>
-                          
-                          <div className="list-group list-group-flush">
-                            {getFilteredObjects(idx).map(object => (
-                              <button
-                                key={object}
-                                type="button"
-                                className={`list-group-item list-group-item-action d-flex align-items-center gap-2 ${
-                                  (cam.objects || []).includes(object) ? 'active' : ''
-                                } objects-menu-item`}
-                                onClick={() => toggleObjectSelection(idx, object)}
-                              >
-                                <input 
-                                  type="checkbox" 
-                                  className="form-check-input"
-                                  checked={(cam.objects || []).includes(object)}
-                                  onChange={() => {}}
-                                  style={{
-                                    backgroundColor: (cam.objects || []).includes(object) 
-                                      ? 'var(--bs-white)' 
-                                      : 'transparent',
-                                    borderColor: (cam.objects || []).includes(object)
-                                      ? 'var(--bs-white)'
-                                      : 'var(--bs-border-color)'
-                                  }}
+
+                          {objectsDropdownOpen[idx] && (
+                            <div className={`position-absolute w-100 border border-top-0 shadow-sm objects-menu ${isDarkMode ? 'bg-dark' : 'bg-white'}`}
+                              style={{
+                                zIndex: 1000,
+                                maxHeight: '200px',
+                                overflowY: 'auto'
+                              }}>
+                              <div className="p-2 border-bottom" style={{ borderColor: 'var(--bs-border-color)' }}>
+                                <input
+                                  className="form-control form-control-sm"
+                                  placeholder="Search objects..."
+                                  value={objectsSearchTerm[idx] || ''}
+                                  onChange={(e) => updateObjectsSearch(idx, e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
                                 />
-                                <span className="text-capitalize" style={{ fontSize: '0.875rem', fontWeight: '500' }}>{object}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="col-md-3">
-                    <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_RECORD_LABEL')}</label>
-                    <select className="form-select" value={cam.record !== false ? 'true' : 'false'} onChange={(e) => updateCamera(idx, 'record', e.target.value === 'true')}>
-                      <option value="true">{t('CONFIG_FRIGATE_CAMERA_RECORD_ENABLED')}</option>
-                      <option value="false">{t('CONFIG_FRIGATE_CAMERA_RECORD_DISABLED')}</option>
-                    </select>
-                  </div>
-                  <div className="col-md-3 d-flex align-items-end justify-content-end">
-                    <button type="button" className="btn btn-outline-danger" onClick={() => removeCamera(idx)}>
-                      {t('CONFIG_FRIGATE_CAMERA_REMOVE')}
-                    </button>
-                  </div>
-                </div>
-                
-                {/* Single Input Section (one stream per camera) */}
-                <div className="mt-3">
-                  <div className="d-flex align-items-center justify-content-between mb-2">
-                    <h6 className="m-0">{t('CONFIG_FRIGATE_CAMERA_INPUTS_LABEL')}</h6>
-                  </div>
-                  
-                  {(cam.inputs || []).map((input, inputIdx) => (
-                    <div 
-                      key={inputIdx} 
-                      className="card mb-2 p-2" 
-                      style={{ backgroundColor: 'var(--bs-secondary-bg)'}}
-                    >
-                      <div className="row g-2 align-items-end">
-                        <div className="col-md-6">
-                          <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_INPUT_PATH_LABEL')}</label>
-                          <input 
-                            className={`form-control form-control-sm ${validationErrors[idx]?.inputs && !input.path.trim() ? 'is-invalid' : ''}`}
-                            value={input.path}
-                            onChange={(e) => updateInput(idx, inputIdx, 'path', e.target.value)}
-                            placeholder="rtsp://admin:L2A32047@192.168.1.3:554/cam/realmonitor?channel=1&subtype=1"
-                          />
-                          {validationErrors[idx]?.inputs && !input.path.trim() && (
-                            <div className="invalid-feedback">{validationErrors[idx].inputs}</div>
+                              </div>
+
+                              <div className="list-group list-group-flush">
+                                {getFilteredObjects(idx).map(object => (
+                                  <button
+                                    key={object}
+                                    type="button"
+                                    className={`list-group-item list-group-item-action d-flex align-items-center gap-2 ${(cam.objects || []).includes(object) ? 'active' : ''
+                                      } objects-menu-item`}
+                                    onClick={() => toggleObjectSelection(idx, object)}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="form-check-input"
+                                      checked={(cam.objects || []).includes(object)}
+                                      onChange={() => { }}
+                                      style={{
+                                        backgroundColor: (cam.objects || []).includes(object)
+                                          ? 'var(--bs-white)'
+                                          : 'transparent',
+                                        borderColor: (cam.objects || []).includes(object)
+                                          ? 'var(--bs-white)'
+                                          : 'var(--bs-border-color)'
+                                      }}
+                                    />
+                                    <span className="text-capitalize" style={{ fontSize: '0.875rem', fontWeight: '500' }}>{object}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                           )}
                         </div>
-                        <div className="col-md-4">
-                          <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_INPUT_ROLES_LABEL')}</label>
-                          <div className="d-flex gap-2 flex-wrap">
-                            <div className="form-check">
-                              <input 
-                                className="form-check-input" 
-                                type="checkbox" 
-                                id={`detect-${idx}-${inputIdx}`}
-                                checked={(input.roles || []).includes('detect')}
-                                onChange={(e) => updateInputRoles(idx, inputIdx, 'detect', e.target.checked)}
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_RECORD_LABEL')}</label>
+                        <select className="form-select" value={cam.record !== false ? 'true' : 'false'} onChange={(e) => updateCamera(idx, 'record', e.target.value === 'true')}>
+                          <option value="true">{t('CONFIG_FRIGATE_CAMERA_RECORD_ENABLED')}</option>
+                          <option value="false">{t('CONFIG_FRIGATE_CAMERA_RECORD_DISABLED')}</option>
+                        </select>
+                      </div>
+                      <div className="col-md-3 d-flex align-items-end justify-content-end">
+                        <button type="button" className="btn btn-outline-danger" onClick={() => removeCamera(idx)}>
+                          {t('CONFIG_FRIGATE_CAMERA_REMOVE')}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Single Input Section (one stream per camera) */}
+                    <div className="mt-3">
+                      <div className="d-flex align-items-center justify-content-between mb-2">
+                        <h6 className="m-0">{t('CONFIG_FRIGATE_CAMERA_INPUTS_LABEL')}</h6>
+                      </div>
+
+                      {(cam.inputs || []).map((input, inputIdx) => (
+                        <div
+                          key={inputIdx}
+                          className="card mb-2 p-2"
+                          style={{ backgroundColor: 'var(--bs-secondary-bg)' }}
+                        >
+                          <div className="row g-2 align-items-end">
+                            <div className="col-md-6">
+                              <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_INPUT_PATH_LABEL')}</label>
+                              <input
+                                className={`form-control form-control-sm ${validationErrors[idx]?.inputs && !input.path.trim() ? 'is-invalid' : ''}`}
+                                value={input.path}
+                                onChange={(e) => updateInput(idx, inputIdx, 'path', e.target.value)}
+                                placeholder="rtsp://admin:L2A32047@192.168.1.3:554/cam/realmonitor?channel=1&subtype=1"
                               />
-                              <label className="form-check-label" htmlFor={`detect-${idx}-${inputIdx}`}>
-                                {t('CONFIG_FRIGATE_CAMERA_INPUT_ROLE_DETECT')}
-                              </label>
+                              {validationErrors[idx]?.inputs && !input.path.trim() && (
+                                <div className="invalid-feedback">{validationErrors[idx].inputs}</div>
+                              )}
                             </div>
-                            <div className="form-check">
-                              <input 
-                                className="form-check-input" 
-                                type="checkbox" 
-                                id={`record-${idx}-${inputIdx}`}
-                                checked={(input.roles || []).includes('record')}
-                                onChange={(e) => updateInputRoles(idx, inputIdx, 'record', e.target.checked)}
-                              />
-                              <label className="form-check-label" htmlFor={`record-${idx}-${inputIdx}`}>
-                                {t('CONFIG_FRIGATE_CAMERA_INPUT_ROLE_RECORD')}
-                              </label>
-                            </div>
-                            <div className="form-check">
-                              <input 
-                                className="form-check-input" 
-                                type="checkbox" 
-                                id={`audio-${idx}-${inputIdx}`}
-                                checked={(input.roles || []).includes('audio')}
-                                onChange={(e) => updateInputRoles(idx, inputIdx, 'audio', e.target.checked)}
-                              />
-                              <label className="form-check-label" htmlFor={`audio-${idx}-${inputIdx}`}>
-                                {t('CONFIG_FRIGATE_CAMERA_INPUT_ROLE_AUDIO')}
-                              </label>
+                            <div className="col-md-4">
+                              <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_INPUT_ROLES_LABEL')}</label>
+                              <div className="d-flex gap-2 flex-wrap">
+                                <div className="form-check">
+                                  <input
+                                    className="form-check-input"
+                                    type="checkbox"
+                                    id={`detect-${idx}-${inputIdx}`}
+                                    checked={(input.roles || []).includes('detect')}
+                                    onChange={(e) => updateInputRoles(idx, inputIdx, 'detect', e.target.checked)}
+                                  />
+                                  <label className="form-check-label" htmlFor={`detect-${idx}-${inputIdx}`}>
+                                    {t('CONFIG_FRIGATE_CAMERA_INPUT_ROLE_DETECT')}
+                                  </label>
+                                </div>
+                                <div className="form-check">
+                                  <input
+                                    className="form-check-input"
+                                    type="checkbox"
+                                    id={`record-${idx}-${inputIdx}`}
+                                    checked={(input.roles || []).includes('record')}
+                                    onChange={(e) => updateInputRoles(idx, inputIdx, 'record', e.target.checked)}
+                                  />
+                                  <label className="form-check-label" htmlFor={`record-${idx}-${inputIdx}`}>
+                                    {t('CONFIG_FRIGATE_CAMERA_INPUT_ROLE_RECORD')}
+                                  </label>
+                                </div>
+                                <div className="form-check">
+                                  <input
+                                    className="form-check-input"
+                                    type="checkbox"
+                                    id={`audio-${idx}-${inputIdx}`}
+                                    checked={(input.roles || []).includes('audio')}
+                                    onChange={(e) => updateInputRoles(idx, inputIdx, 'audio', e.target.checked)}
+                                  />
+                                  <label className="form-check-label" htmlFor={`audio-${idx}-${inputIdx}`}>
+                                    {t('CONFIG_FRIGATE_CAMERA_INPUT_ROLE_AUDIO')}
+                                  </label>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+                  </div>
+                ))}
 
-            <div className="d-flex justify-content-end">
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? t('CONFIG_FRIGATE_SAVE_BUTTON_LOADING') : t('CONFIG_FRIGATE_SAVE_BUTTON')}
-              </button>
-            </div>
+                <div className="d-flex justify-content-end">
+                  <button type="submit" className="btn btn-primary" disabled={saving}>
+                    {saving ? t('CONFIG_FRIGATE_SAVE_BUTTON_LOADING') : t('CONFIG_FRIGATE_SAVE_BUTTON')}
+                  </button>
+                </div>
               </form>
             </div>
           ) : (
@@ -807,6 +1053,123 @@ export default function ConfigPage() {
                 <span className="text-muted d-flex align-items-center">{t('CONFIG_SYNC_JELLYFIN_NOT_INSTALLED')}</span>
               )}
             </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="timemachine">
+          <div className="card p-3">
+            <h3 className="mb-2">{t('CONFIG_SMB_SHARES_TITLE')}</h3>
+            <p className="text-muted mb-3">{t('CONFIG_SMB_SHARES_DESCRIPTION')}</p>
+
+            {smbSuccess && (
+              <div className="alert alert-success" role="alert">
+                {smbSuccess}
+              </div>
+            )}
+
+            <div className="mb-4">
+              <div className="row g-2 align-items-center">
+                <div className="col-md-4">
+                  <label className="form-check form-switch">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      checked={smbShares.enabled}
+                      disabled={smbSaving}
+                      onChange={(e) => {
+                        toggleSmbEnabled(e.target.checked);
+                      }}
+                    />
+                    <span className="form-check-label">{t('CONFIG_SMB_ENABLE_LABEL')}</span>
+                  </label>
+                </div>
+                <div className="col-md-4 text-muted">
+                  {t('CONFIG_SMB_TOTAL_SPACE', { total: formatBytes(smbShares.storageTotalBytes) })}
+                </div>
+                <div className="col-md-4 text-md-end">
+                  <Button intent="primary" onClick={() => saveSmbSharesConfig()} disabled={smbSaving}>
+                    {smbSaving ? t('CONFIG_SMB_APPLYING') : t('CONFIG_SMB_SAVE_SHARES')}
+                  </Button>
+                </div>
+              </div>
+              {!smbShares.enabled && (
+                <div className="mt-2 text-muted">{t('CONFIG_SMB_ENABLE_HINT')}</div>
+              )}
+            </div>
+
+            {smbShares.enabled && (
+              <>
+                <div className="mb-4">
+                  <h5 className="mb-2">{t('CONFIG_SMB_CREDENTIALS_TITLE')}</h5>
+                  <div className="row g-2 align-items-end">
+                    <div className="col-md-4">
+                      <label className="form-label">{t('CONFIG_SMB_USERNAME')}</label>
+                      <input className="form-control" value={smbShares.username} disabled />
+                    </div>
+                    <div className="col-md-8">
+                      <label className="form-label">{t('CONFIG_SMB_PASSWORD_LABEL')}</label>
+                      <input
+                        className="form-control"
+                        type="password"
+                        value={smbPassword}
+                        onChange={(e) => setSmbPassword(e.target.value)}
+                        placeholder={t('CONFIG_SMB_PASSWORD_PLACEHOLDER')}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <h5 className="m-0">{t('CONFIG_SMB_MANAGE_SHARES_TITLE')}</h5>
+                </div>
+
+                <div className="mb-3 text-muted">
+                  {smbShares.message || t('CONFIG_SMB_STATUS', { status: smbShares.status })}
+                </div>
+
+                <div className="d-flex flex-column gap-2">
+                  {smbShareRows.map((share, idx) => {
+                    const applied = smbShares.appliedShares.find((item) => item.name.toLowerCase() === share.name.toLowerCase());
+                    const isNewRow = idx >= smbShares.shares.length;
+                    return (
+                      <div key={share.uiId || `smb-share-${idx}`} className="border rounded p-2">
+                        <div className="row g-2 align-items-end">
+                          <div className="col-md-3">
+                            <label className="form-label">{t('CONFIG_SMB_SHARE_NAME')}</label>
+                            <input className="form-control" value={share.name} onChange={(e) => updateSmbShareRow(idx, 'name', e.target.value)} placeholder="MyBackup" />
+                          </div>
+                          <div className="col-md-2">
+                            <label className="form-label">{t('CONFIG_SMB_SHARE_QUOTA')}</label>
+                            <input className="form-control" value={share.quota} onChange={(e) => updateSmbShareRow(idx, 'quota', e.target.value)} />
+                          </div>
+                          <div className="col-md-3">
+                            <label className="form-label">{t('CONFIG_SMB_SHARE_TYPE')}</label>
+                            <select className="form-select" value={share.type} onChange={(e) => updateSmbShareRow(idx, 'type', e.target.value)}>
+                              <option value="macos">{t('CONFIG_SMB_SHARE_TYPE_MACOS')}</option>
+                              <option value="windows">{t('CONFIG_SMB_SHARE_TYPE_WINDOWS')}</option>
+                            </select>
+                          </div>
+                          <div className="col-md-2">
+                            <div className="text-muted">{t('CONFIG_SMB_MOUNTPOINT')}</div>
+                            <div className="font-monospace">{applied?.mountpoint || '-'}</div>
+                          </div>
+                          <div className="col-md-2 d-flex justify-content-end">
+                            <Button intent="danger" onClick={() => setSmbDeleteTarget(share)} disabled={smbSaving || isNewRow}>
+                              {t('APP_ACTION_REMOVE')}
+                            </Button>
+                          </div>
+                        </div>
+                        {applied?.dataset && (
+                          <div className="mt-2 text-muted font-monospace">
+                            {applied.dataset}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         </TabsContent>
 
@@ -852,7 +1215,7 @@ export default function ConfigPage() {
               intent="warning"
               onClick={async () => {
                 try {
-                  const res = await fetch('/api/config/sync/jellyfin', { method: 'POST' });
+                  const res = await authenticatedFetch('/api/config/sync/jellyfin', { method: 'POST' });
                   if (!res.ok) throw new Error(`Request failed: ${res.status}`);
                   setSuccess(t('CONFIG_SYNC_SUCCESS'));
                 } catch (e: any) {
@@ -863,6 +1226,35 @@ export default function ConfigPage() {
               }}
             >
               {t('CONFIG_SYNC_DIALOG_CONFIRM')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(smbDeleteTarget)} onOpenChange={(open) => {
+        if (!open) setSmbDeleteTarget(null);
+      }}>
+        <DialogContent size="sm" type="danger">
+          <DialogHeader>
+            <DialogTitle>{t('CONFIG_SMB_DELETE_DIALOG_TITLE')}</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            <span className="text-muted">
+              {t('CONFIG_SMB_DELETE_DIALOG_SUBTITLE', { name: smbDeleteTarget?.name || '' })}
+            </span>
+          </DialogDescription>
+          <DialogFooter>
+            <Button onClick={() => setSmbDeleteTarget(null)}>{t('ACTIONS_CANCEL')}</Button>
+            <Button
+              intent="danger"
+              onClick={() => {
+                if (!smbDeleteTarget) return;
+                removeSmbShare(smbDeleteTarget.name);
+                setSmbDeleteTarget(null);
+              }}
+              disabled={smbSaving}
+            >
+              {smbSaving ? t('CONFIG_SMB_APPLYING') : t('CONFIG_SMB_DELETE_CONFIRM')}
             </Button>
           </DialogFooter>
         </DialogContent>
