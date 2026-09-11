@@ -40,7 +40,7 @@ describe('ReposHelpers', () => {
     const configuration = mock<ConfigurationService>();
     filesystem = new FilesystemService(logger);
 
-    configuration.get.calledWith('directories').mockReturnValue({ dataDir: DATA_DIR });
+    configuration.get.calledWith('directories').mockReturnValue({ dataDir: DATA_DIR, appDataDir: DATA_DIR, appDir: DATA_DIR } as any);
 
     helper = new ReposHelpers(logger, configuration, filesystem);
   });

@@ -30,7 +30,9 @@ const cameraSchema = type({
   ip: 'string?',
   user: 'string?',
   password: 'string?',
-  inputs: type({ path: 'string', roles: type('string[]').default(() => []) }).array().default(() => []),
+  inputs: type({ path: 'string', roles: type('string[]').default(() => []) })
+    .array()
+    .default(() => []),
   objects: type('string[]').default(() => []),
   record: type('boolean').default(true),
 });
@@ -240,3 +242,12 @@ const smbSharesStatusSchema = type({
 export class SmbSharesConfigDto extends createArkDto(smbSharesConfigSchema, { name: 'SmbSharesConfigDto', input: true }) {}
 export class SmbShareUpdateDto extends createArkDto(smbShareUpdateSchema, { name: 'SmbShareUpdateDto', input: true }) {}
 export class SmbSharesStatusDto extends createArkDto(smbSharesStatusSchema, { name: 'SmbSharesStatusDto' }) {}
+
+/* ---------- IPv6 Verify ---------- */
+const ipv6VerifySchema = type({
+  supported: 'boolean',
+  ipv6: 'string?',
+  message: 'string',
+});
+
+export class Ipv6VerifyDto extends createArkDto(ipv6VerifySchema, { name: 'Ipv6VerifyDto' }) {}

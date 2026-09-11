@@ -38,6 +38,7 @@ import { ArkValidationPipe } from 'nestjs-arktype';
 import { AppConfigModule } from './modules/app-config/app-config.module';
 import { CustomAppsModule } from './modules/custom-apps/custom-apps.module';
 import { ConfigModule } from './modules/config/config.module';
+import { UtilityModule } from './modules/utility/utility.module';
 
 const DEFAULT_THROTTLE_TTL = 60_000;
 const DEFAULT_THROTTLE_LIMIT = 300;
@@ -71,6 +72,7 @@ const imports: (DynamicModule | typeof I18nModule)[] = [
   CustomAppsModule,
   AppConfigModule,
   ConfigModule,
+  UtilityModule,
 ];
 
 const { NODE_ENV } = process.env;

@@ -22,7 +22,8 @@
     "experimentalDecorators": true,
     "strictPropertyInitialization": false,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@runtipi/common/*": ["../common/src/*"]
     }
   }
 }

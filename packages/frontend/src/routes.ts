@@ -36,9 +36,12 @@ export default [
 
     // Config route
     ...prefix('config', [index('./modules/config/pages/config-page.tsx', { id: 'config' })]),
-    
+
     // External USB route
     ...prefix('external-usb', [index('./modules/external-usb/pages/external-usb-page.tsx', { id: 'external-usb' })]),
+
+    // Utility route
+    ...prefix('utility', [index('./modules/utility/pages/utility-page.tsx', { id: 'utility' })]),
   ]),
   route('*', './routes/not-found.tsx'),
 ] satisfies RouteConfig;

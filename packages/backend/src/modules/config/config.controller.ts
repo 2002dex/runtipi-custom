@@ -26,18 +26,29 @@ import {
   SmbShareUpdateDto,
   SmbSharesConfigDto,
   SmbSharesStatusDto,
+  Ipv6VerifyDto,
 } from './dto/config.dto';
 
 @Controller('config')
 @UseGuards(AuthGuard)
 export class ConfigController {
-  constructor(private readonly cfg: AppConfigService, private readonly appLifecycle: AppLifecycleService) {}
+  constructor(
+    private readonly cfg: AppConfigService,
+    private readonly appLifecycle: AppLifecycleService,
+  ) {}
 
   @Get('info')
   @ApiResponse({ type: InfoDto })
   async info(): Promise<InfoDto> {
     const internalIp = await this.cfg.getInternalIp();
     return InfoDto.parse({ internalIp }, { reportOnly: true });
+  }
+
+  @Post('verify-ipv6')
+  @ApiResponse({ type: Ipv6VerifyDto })
+  async verifyIpv6(): Promise<Ipv6VerifyDto> {
+    const res = await this.cfg.verifyIpv6();
+    return Ipv6VerifyDto.parse(res, { reportOnly: true });
   }
 
   @Get('frigate/status')
@@ -226,6 +237,34 @@ export class ConfigController {
     if (!validatedBody?.device) throw new HttpException('device is required', HttpStatus.BAD_REQUEST);
     const res = await this.cfg.mountUsbDevice(validatedBody.device);
     return UsbOpDto.parse(res, { reportOnly: true });
+  }
+
+  @Post('usb/mount-backup')
+  @ApiResponse({ type: UsbOpDto })
+  async mountBackupUsb(@Body() body: UsbSelectDto): Promise<UsbOpDto> {
+    const validatedBody = UsbSelectDto.parse(body, { reportOnly: true });
+    if (!validatedBody?.device) throw new HttpException('device is required', HttpStatus.BAD_REQUEST);
+    const res = await this.cfg.mountBackupUsbDevice(validatedBody.device);
+    return UsbOpDto.parse(res, { reportOnly: true });
+  }
+
+  @Post('usb/copy')
+  @ApiResponse({ type: UsbOpDto })
+  async copyUsb(): Promise<UsbOpDto> {
+    const res = await this.cfg.startUsbCopy();
+    return UsbOpDto.parse(res, { reportOnly: true });
+  }
+
+  @Post('usb/copy-stop')
+  @ApiResponse({ type: UsbOpDto })
+  async copyStopUsb(): Promise<UsbOpDto> {
+    const res = await this.cfg.stopUsbCopy();
+    return UsbOpDto.parse(res, { reportOnly: true });
+  }
+
+  @Get('usb/copy-status')
+  async getCopyStatus(): Promise<any> {
+    return this.cfg.getUsbCopyStatus();
   }
 
   @Post('usb/unmount')

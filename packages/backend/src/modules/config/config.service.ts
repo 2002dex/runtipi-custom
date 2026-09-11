@@ -1,10 +1,12 @@
 import path from 'node:path';
+import http from 'node:http';
 import * as yaml from 'yaml';
 import { Injectable } from '@nestjs/common';
 import { ConfigurationService } from '@/core/config/configuration.service';
 import { FilesystemService } from '@/core/filesystem/filesystem.service';
 import { AppsService } from '@/modules/apps/apps.service';
 import { createAppUrn } from '@/common/helpers/app-helpers';
+import { execFileAsync } from '@/common/helpers/exec-helpers';
 import fs from 'node:fs';
 
 const STATE_DIR = '/data/state';
@@ -40,6 +42,104 @@ export class ConfigService {
     return conf.internalIp || conf.userSettings.internalIp || '127.0.0.1';
   }
 
+  async verifyIpv6(): Promise<{ supported: boolean; ipv6?: string; message: string }> {
+    const stateDir = this.getStateDir();
+    const ipv6File = path.join(stateDir, 'ipv6.txt');
+
+    try {
+      if (await this.fs.pathExists(ipv6File)) {
+        const text = await this.fs.readTextFile(ipv6File);
+        const trimmed = (text || '').trim();
+        if (trimmed) {
+          return { supported: true, ipv6: trimmed, message: 'Supports Jitsi Meet' };
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return {
+      supported: false,
+      message: 'Does not support Jitsi Meet',
+    };
+  }
+
+  private async runIpv6CheckViaDockerSocket(): Promise<string | null> {
+    const socketPath = '/var/run/docker.sock';
+    if (!fs.existsSync(socketPath)) return null;
+
+    const request = (pathStr: string, method = 'GET', body?: unknown): Promise<{ status: number; raw: string }> => {
+      return new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            socketPath,
+            path: pathStr,
+            method,
+            headers: body
+              ? {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(JSON.stringify(body)),
+                }
+              : undefined,
+          },
+          (res) => {
+            let data = '';
+            res.on('data', (chunk) => {
+              data += chunk.toString();
+            });
+            res.on('end', () => resolve({ status: res.statusCode || 500, raw: data }));
+          },
+        );
+        req.on('error', reject);
+        req.setTimeout(8000, () => {
+          req.destroy();
+          reject(new Error('Timeout'));
+        });
+        if (body) req.write(JSON.stringify(body));
+        req.end();
+      });
+    };
+
+    try {
+      let imageName = 'smritimegh';
+      const hostname = process.env.HOSTNAME;
+      if (hostname) {
+        try {
+          const selfRes = await request(`/containers/${hostname}/json`);
+          if (selfRes.status === 200) {
+            const parsed = JSON.parse(selfRes.raw);
+            if (parsed?.Config?.Image) {
+              imageName = parsed.Config.Image;
+            }
+          }
+        } catch (_) {}
+      }
+
+      const createRes = await request('/containers/create', 'POST', {
+        Image: imageName,
+        Cmd: ['curl', '-6', '-fsS', '--max-time', '5', 'https://ifconfig.me'],
+        HostConfig: {
+          NetworkMode: 'host',
+          AutoRemove: true,
+        },
+      });
+
+      if (createRes.status !== 201) return null;
+      const containerData = JSON.parse(createRes.raw);
+      const containerId = containerData?.Id;
+      if (!containerId) return null;
+
+      await request(`/containers/${containerId}/start`, 'POST');
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      const logsRes = await request(`/containers/${containerId}/logs?stdout=true&stderr=true`);
+      const match = logsRes.raw.match(/([0-9a-fA-F]{1,4}:[0-9a-fA-F:]+:[0-9a-fA-F]{1,4})/);
+      return (match && match[1]) ? match[1] : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   async getFrigateStatus() {
     return this.getAppStatusByName('frigate');
   }
@@ -52,12 +152,12 @@ export class ConfigService {
     const apps = ['nextcloud', 'jellyfin', 'immich'];
     const installed = await this.apps.getInstalledApps();
     const result = { nextcloud: false, jellyfin: false, immich: false };
-    
+
     for (const appName of apps) {
       const app = installed.find((a) => a?.app?.appName === appName);
       result[appName as keyof typeof result] = !!app;
     }
-    
+
     return result;
   }
 
@@ -80,12 +180,22 @@ export class ConfigService {
     return dataDir;
   }
 
-  async readFrigateConfig(): Promise<{ cameras: Array<{ name: string; ip?: string; user?: string; password?: string; objects?: string[]; record?: boolean; inputs?: Array<{ path: string; roles: string[] }> }>; }> {
+  async readFrigateConfig(): Promise<{
+    cameras: Array<{
+      name: string;
+      ip?: string;
+      user?: string;
+      password?: string;
+      objects?: string[];
+      record?: boolean;
+      inputs?: Array<{ path: string; roles: string[] }>;
+    }>;
+  }> {
     const base = await this.getFrigateAppDataDir();
     // Use only the primary path: frigate/data/config/config.yml
     const filePath = path.join(base, 'data', 'config', 'config.yml');
 
-    if (!await this.fs.pathExists(filePath)) {
+    if (!(await this.fs.pathExists(filePath))) {
       // Nothing yet; return empty cameras
       return { cameras: [] };
     }
@@ -98,11 +208,19 @@ export class ConfigService {
       data = {};
     }
 
-    const out: Array<{ name: string; ip?: string; user?: string; password?: string; objects?: string[]; record?: boolean; inputs?: Array<{ path: string; roles: string[] }> }> = [];
+    const out: Array<{
+      name: string;
+      ip?: string;
+      user?: string;
+      password?: string;
+      objects?: string[];
+      record?: boolean;
+      inputs?: Array<{ path: string; roles: string[] }>;
+    }> = [];
     if (data?.cameras && typeof data.cameras === 'object') {
       for (const [name, cfg] of Object.entries<any>(data.cameras)) {
         const inputs: Array<{ path: string; roles: string[] }> = [];
-        
+
         // Extract inputs from ffmpeg configuration
         if (Array.isArray(cfg?.ffmpeg?.inputs)) {
           cfg.ffmpeg.inputs.forEach((input: any) => {
@@ -115,7 +233,7 @@ export class ConfigService {
             });
           });
         }
-        
+
         // Best-effort extraction of ip/user/password from first RTSP path for backward compatibility
         let ip = '';
         let user: string | undefined;
@@ -134,7 +252,7 @@ export class ConfigService {
             ip = simpleMatch[1] ?? '';
           }
         }
-        
+
         // Extract objects from objects.track structure
         let objects: string[] = [];
         if (cfg?.objects?.track && Array.isArray(cfg.objects.track)) {
@@ -143,7 +261,7 @@ export class ConfigService {
           // Fallback to old structure for backward compatibility
           objects = cfg.detect.objects;
         }
-        
+
         const record = Boolean(cfg?.record?.enabled ?? true);
         out.push({ name, ip, user, password, objects, record, inputs });
       }
@@ -152,7 +270,17 @@ export class ConfigService {
     return { cameras: out };
   }
 
-  async writeFrigateConfig(body: { cameras: Array<{ name: string; ip?: string; user?: string; password?: string; objects?: string[]; record?: boolean; inputs?: Array<{ path: string; roles: string[] }> }>; }) {
+  async writeFrigateConfig(body: {
+    cameras: Array<{
+      name: string;
+      ip?: string;
+      user?: string;
+      password?: string;
+      objects?: string[];
+      record?: boolean;
+      inputs?: Array<{ path: string; roles: string[] }>;
+    }>;
+  }) {
     const base = await this.getFrigateAppDataDir();
     // Use only the primary path: frigate/data/config/config.yml
     const filePath = path.join(base, 'data', 'config', 'config.yml');
@@ -172,11 +300,13 @@ export class ConfigService {
     const cameras: any = {};
     for (const cam of body.cameras) {
       let inputs: Array<{ path: string; roles: string[] }> = [];
-      
+
       if (cam.inputs && cam.inputs.length > 0) {
         // Use the provided inputs (normalize roles to lowercase and filter valid)
         inputs = cam.inputs.map((input) => {
-          const roles = Array.from(new Set((input.roles || []).map((r: any) => String(r).toLowerCase()))).filter((r) => ['detect', 'record', 'audio'].includes(r));
+          const roles = Array.from(new Set((input.roles || []).map((r: any) => String(r).toLowerCase()))).filter((r) =>
+            ['detect', 'record', 'audio'].includes(r),
+          );
           return {
             path: input.path,
             roles,
@@ -188,13 +318,13 @@ export class ConfigService {
         const url = `rtsp://${auth}${cam.ip}`;
         inputs = [{ path: url, roles: ['detect', ...(cam.record !== false ? ['record'] : [])] }];
       }
-      
+
       cameras[cam.name] = {
         ffmpeg: {
           inputs: inputs,
         },
         objects: {
-          track: cam.objects ?? ['person']
+          track: cam.objects ?? ['person'],
         },
         detect: { enabled: true },
         record: { enabled: cam.record !== false },
@@ -204,7 +334,7 @@ export class ConfigService {
     // Preserve existing config structure, only update cameras
     const finalConfig = {
       ...existingConfig,
-      cameras
+      cameras,
     };
 
     // Ensure parent dir exists
@@ -215,7 +345,9 @@ export class ConfigService {
   }
 
   private normalizeTimeMachineQuota(quota: string) {
-    const normalized = String(quota || '').trim().toUpperCase();
+    const normalized = String(quota || '')
+      .trim()
+      .toUpperCase();
     if (!/^[1-9][0-9]*(M|G|T)$/.test(normalized)) {
       throw new Error('Quota must use a positive size ending in M, G, or T');
     }
@@ -319,7 +451,9 @@ export class ConfigService {
   }
 
   private normalizeSmbShareType(typeValue: unknown): SmbShare['type'] {
-    const normalized = String(typeValue || 'macos').trim().toLowerCase();
+    const normalized = String(typeValue || 'macos')
+      .trim()
+      .toLowerCase();
     if (normalized !== 'macos' && normalized !== 'windows') {
       throw new Error('Share type must be macos or windows');
     }
@@ -345,7 +479,9 @@ export class ConfigService {
     return normalized;
   }
 
-  private normalizeSmbShares(shares: Array<{ id?: string; name: string; quota: string; type?: string; dataset?: string; mountpoint?: string }>): SmbShare[] {
+  private normalizeSmbShares(
+    shares: Array<{ id?: string; name: string; quota: string; type?: string; dataset?: string; mountpoint?: string }>,
+  ): SmbShare[] {
     const seenIds = new Set<string>();
     const seenNames = new Set<string>();
     const normalizedShares = (shares || []).map((share) => {
@@ -391,10 +527,7 @@ export class ConfigService {
 
   private async getSmbStorageInfo(): Promise<{ storageTotalBytes: number; storageFreeBytes: number }> {
     const stateDir = this.getStateDir();
-    const candidates = [
-      path.join(stateDir, 'system_status.tmp'),
-      path.join(stateDir, 'system_status'),
-    ];
+    const candidates = [path.join(stateDir, 'system_status.tmp'), path.join(stateDir, 'system_status')];
 
     for (const file of candidates) {
       try {
@@ -470,7 +603,12 @@ export class ConfigService {
     return this.buildSmbSharesResponse(desired, latestStatus, await this.getSmbStorageInfo());
   }
 
-  async writeSmbSharesConfig(body: { enabled: boolean; password?: string; deleteShares?: string[]; shares: Array<{ id?: string; name: string; quota: string; type?: string; dataset?: string; mountpoint?: string }> }) {
+  async writeSmbSharesConfig(body: {
+    enabled: boolean;
+    password?: string;
+    deleteShares?: string[];
+    shares: Array<{ id?: string; name: string; quota: string; type?: string; dataset?: string; mountpoint?: string }>;
+  }) {
     const desired = {
       enabled: Boolean(body.enabled),
       shares: this.normalizeSmbShares(body.shares || []),
@@ -530,14 +668,16 @@ export class ConfigService {
     }
 
     const nextShares = [...desired.shares];
-    const updatedShare = this.normalizeSmbShares([{
-      id: shareId,
-      name: body.name ?? existingShare.name,
-      quota: body.quota ?? existingShare.quota,
-      type: body.type ?? existingShare.type,
-      dataset: existingShare.dataset,
-      mountpoint: existingShare.mountpoint,
-    }])[0];
+    const updatedShare = this.normalizeSmbShares([
+      {
+        id: shareId,
+        name: body.name ?? existingShare.name,
+        quota: body.quota ?? existingShare.quota,
+        type: body.type ?? existingShare.type,
+        dataset: existingShare.dataset,
+        mountpoint: existingShare.mountpoint,
+      },
+    ])[0];
     if (!updatedShare) {
       throw new Error('Invalid SMB share update');
     }
@@ -549,7 +689,11 @@ export class ConfigService {
     });
   }
 
-  private buildSmbSharesResponse(desired: { enabled: boolean; shares: SmbShare[] }, latestStatus: Record<string, unknown>, storage: { storageTotalBytes: number; storageFreeBytes: number }) {
+  private buildSmbSharesResponse(
+    desired: { enabled: boolean; shares: SmbShare[] },
+    latestStatus: Record<string, unknown>,
+    storage: { storageTotalBytes: number; storageFreeBytes: number },
+  ) {
     const statusAppliedShares = Array.isArray(latestStatus.appliedShares)
       ? latestStatus.appliedShares
           .filter((share: any) => share && typeof share === 'object')
@@ -643,14 +787,12 @@ export class ConfigService {
   async listUsersFromState(): Promise<string[]> {
     const primary = path.join(this.getStateDir(), 'user_list.json');
     const fallback = path.join(DEMO_DIR, 'user_list.json');
-    const file = await this.fs.pathExists(primary) ? primary : fallback;
+    const file = (await this.fs.pathExists(primary)) ? primary : fallback;
     try {
       const text = await this.fs.readTextFile(file);
       const arr = JSON.parse(text || '[]');
       if (!Array.isArray(arr)) return [];
-      return arr
-        .filter((it: any) => it && typeof it === 'object' && typeof it.user === 'string')
-        .map((it: any) => String(it.user));
+      return arr.filter((it: any) => it && typeof it === 'object' && typeof it.user === 'string').map((it: any) => String(it.user));
     } catch {
       return [];
     }
@@ -659,7 +801,7 @@ export class ConfigService {
   private async loadUserMap(): Promise<Record<string, string>> {
     const primary = path.join(this.getStateDir(), 'user_list.json');
     const fallback = path.join(DEMO_DIR, 'user_list.json');
-    const file = await this.fs.pathExists(primary) ? primary : fallback;
+    const file = (await this.fs.pathExists(primary)) ? primary : fallback;
     try {
       const text = await this.fs.readTextFile(file);
       const arr = JSON.parse(text || '[]');
@@ -757,9 +899,7 @@ export class ConfigService {
 
       try {
         const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-        const candidates = entries
-          .filter((e) => e.isFile() && pattern.test(e.name))
-          .map((e) => path.join(dir, e.name));
+        const candidates = entries.filter((e) => e.isFile() && pattern.test(e.name)).map((e) => path.join(dir, e.name));
 
         if (candidates.length > 0) {
           // Find the newest candidate by mtime (async, avoids statSync blocking the event loop)
@@ -864,7 +1004,7 @@ export class ConfigService {
     try {
       const text = await this.fs.readTextFile(usbList);
       const data = JSON.parse(text || 'null');
-      const raw = (data && typeof data === 'object' && Array.isArray((data as any).devices)) ? (data as any).devices : [];
+      const raw = data && typeof data === 'object' && Array.isArray((data as any).devices) ? (data as any).devices : [];
       const found = (raw as any[]).find((d) => d && typeof d === 'object' && d.device === device);
       if (found) selected = found;
     } catch {
@@ -940,9 +1080,7 @@ export class ConfigService {
       try {
         const text = await this.fs.readTextFile(path.join(stateDir, 'usb_list.json'));
         const data = JSON.parse(text || 'null');
-        const raw = (data && typeof data === 'object' && Array.isArray((data as any).devices))
-          ? (data as any).devices
-          : [];
+        const raw = data && typeof data === 'object' && Array.isArray((data as any).devices) ? (data as any).devices : [];
         const found = (raw as any[]).find((d: any) => d && typeof d === 'object' && d.device === device);
         if (found && found.mountpoint) mounted = true;
       } catch {
@@ -977,7 +1115,7 @@ export class ConfigService {
       if (minMtimeMs > 0 && st.mtimeMs < minMtimeMs) return null;
       const text = await this.fs.readTextFile(errFile);
       const data = JSON.parse(text || 'null');
-      const msg = (data && typeof data === 'object' && typeof (data as any).error === 'string') ? String((data as any).error) : null;
+      const msg = data && typeof data === 'object' && typeof (data as any).error === 'string' ? String((data as any).error) : null;
       return msg || null;
     } catch {
       return null;
@@ -1023,7 +1161,17 @@ export class ConfigService {
     }
   }
 
-  async scanUsbDevices(): Promise<{ devices: Array<{ device: string; model: string | null; size: string | null; mountpoint: string | null; uuid: string | null; label: string | null }>; error?: string }> {
+  async scanUsbDevices(): Promise<{
+    devices: Array<{
+      device: string;
+      model: string | null;
+      size: string | null;
+      mountpoint: string | null;
+      uuid: string | null;
+      label: string | null;
+    }>;
+    error?: string;
+  }> {
     const { mtimeMs } = await this.writeCommand('scan');
 
     const usbList = path.join(this.getStateDir(), 'usb_list.json');
@@ -1042,7 +1190,7 @@ export class ConfigService {
     try {
       const text = await this.fs.readTextFile(usbList);
       const data = JSON.parse(text || 'null');
-      const raw = (data && typeof data === 'object' && Array.isArray((data as any).devices)) ? (data as any).devices : [];
+      const raw = data && typeof data === 'object' && Array.isArray((data as any).devices) ? (data as any).devices : [];
       const devices = (raw as any[])
         .filter((d) => d && typeof d === 'object' && typeof d.device === 'string')
         .map((d) => ({
@@ -1059,14 +1207,13 @@ export class ConfigService {
     }
   }
 
-
   async mountUsbDevice(device: string): Promise<{ ok: boolean; error?: string }> {
     const stateDir = this.getStateDir();
     await this.fs.createDirectory(stateDir);
     const usbList = path.join(this.getStateDir(), 'usb_list.json');
     const text = await this.fs.readTextFile(usbList);
     const data = JSON.parse(text || 'null');
-    const raw = (data && typeof data === 'object' && Array.isArray((data as any).devices)) ? (data as any).devices : [];
+    const raw = data && typeof data === 'object' && Array.isArray((data as any).devices) ? (data as any).devices : [];
     const selectedDevice = (raw as any[]).find((d) => d && typeof d === 'object' && d.device === device);
     await this.fs.writeTextFile(path.join(stateDir, 'selected_usb.json'), JSON.stringify(selectedDevice || { device }, null, 2));
 
@@ -1113,6 +1260,66 @@ export class ConfigService {
     return { ok: true };
   }
 
+  async mountBackupUsbDevice(device: string): Promise<{ ok: boolean; error?: string }> {
+    const stateDir = this.getStateDir();
+    await this.fs.createDirectory(stateDir);
+    let selectedDevice: any = { device };
+    try {
+      const usbList = path.join(this.getStateDir(), 'usb_list.json');
+      const text = await this.fs.readTextFile(usbList);
+      const data = JSON.parse(text || 'null');
+      const raw = data && typeof data === 'object' && Array.isArray((data as any).devices) ? (data as any).devices : [];
+      const found = (raw as any[]).find((d) => d && typeof d === 'object' && d.device === device);
+      if (found) selectedDevice = found;
+    } catch {}
+
+    await this.fs.writeTextFile(path.join(stateDir, 'selected_usb.json'), JSON.stringify(selectedDevice, null, 2));
+    await this.fs.writeTextFile(path.join(stateDir, 'selected_app.txt'), 'backup');
+
+    const { mtimeMs } = await this.writeCommand('mount-backup');
+    const statusFile = path.join(stateDir, 'mount_status.json');
+
+    try {
+      const timeoutMsEnv = Number(process.env.USB_MOUNT_WAIT_TIMEOUT_MS ?? 0);
+      await this.waitForStableFile(statusFile, mtimeMs, {
+        timeoutMs: Number.isFinite(timeoutMsEnv) && timeoutMsEnv > 0 ? timeoutMsEnv : 0,
+      });
+    } catch (e: any) {
+      const err = await this.readErrorStatusIfNewer(mtimeMs);
+      return { ok: false, error: err || String(e) };
+    }
+
+    const err = await this.readErrorStatusIfNewer(mtimeMs);
+    if (err) return { ok: false, error: err };
+
+    return { ok: true };
+  }
+
+  async startUsbCopy(): Promise<{ ok: boolean; error?: string }> {
+    const stateDir = this.getStateDir();
+    await this.fs.createDirectory(stateDir);
+    await this.writeCommand('copy');
+    return { ok: true };
+  }
+
+  async stopUsbCopy(): Promise<{ ok: boolean; error?: string }> {
+    const stateDir = this.getStateDir();
+    await this.fs.createDirectory(stateDir);
+    await this.writeCommand('copy-stop');
+    return { ok: true };
+  }
+
+  async getUsbCopyStatus(): Promise<any> {
+    const statusFile = path.join(this.getStateDir(), 'copy_status.json');
+    try {
+      const text = await this.fs.readTextFile(statusFile);
+      const data = JSON.parse(text || 'null');
+      return data || { status: 'waiting', message: 'copy_status.json empty' };
+    } catch {
+      return { status: 'waiting', message: 'copy_status.json not found' };
+    }
+  }
+
   async removeAllSelected(): Promise<{ ok: boolean }> {
     await this.fs.createDirectory(this.getStateDir());
 
@@ -1138,7 +1345,9 @@ export class ConfigService {
       const entries = await fs.promises.readdir(dir, { withFileTypes: true });
       for (const e of entries) {
         if (e.isFile() && e.name.endsWith('.processed')) {
-          try { await fs.promises.unlink(path.join(dir, e.name)); } catch {}
+          try {
+            await fs.promises.unlink(path.join(dir, e.name));
+          } catch {}
         }
       }
     } catch {}

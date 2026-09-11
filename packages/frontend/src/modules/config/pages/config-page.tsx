@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/Button';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useAuthenticatedFetch } from '@/lib/hooks/use-authenticated-fetch';
 import toast from 'react-hot-toast';
+import { IconCopy } from '@tabler/icons-react';
+import { copyTextToClipboard } from '@/lib/helpers/text-helpers';
 
 function DuplicatesTab() {
   const { t } = useTranslation();
@@ -55,7 +57,6 @@ function DuplicatesTab() {
       setResultLoading(false);
     }
   };
-
 
   const onSelectUser = (username: string) => {
     setSelectedUser(username);
@@ -122,14 +123,17 @@ function DuplicatesTab() {
     }
   };
 
-
   return (
     <div>
       {dupError && (
-        <div className="alert alert-danger" role="alert">{dupError}</div>
+        <div className="alert alert-danger" role="alert">
+          {dupError}
+        </div>
       )}
       {dupSuccess && (
-        <div className="alert alert-success" role="alert">{dupSuccess}</div>
+        <div className="alert alert-success" role="alert">
+          {dupSuccess}
+        </div>
       )}
       {!hasRunFind && (
         <div className="row g-2 align-items-end mb-3">
@@ -138,12 +142,12 @@ function DuplicatesTab() {
             <select className="form-select" disabled={usersLoading} value={selectedUser} onChange={(e) => onSelectUser(e.target.value)}>
               <option value="">{usersLoading ? t('APP_ACTION_LOADING') : t('APP_INSTALL_FORM_CHOOSE_OPTION')}</option>
               {users.map((u) => (
-                <option key={u} value={u}>{u}</option>
+                <option key={u} value={u}>
+                  {u}
+                </option>
               ))}
             </select>
-            {!usersLoading && users.length === 0 && (
-              <div className="form-text text-warning">{t('CONFIG_DUPLICATES_NO_USERS')}</div>
-            )}
+            {!usersLoading && users.length === 0 && <div className="form-text text-warning">{t('CONFIG_DUPLICATES_NO_USERS')}</div>}
           </div>
           <div className="col-md-4 d-flex gap-2">
             <Button intent="primary" onClick={handleFindClick} disabled={!selectedUser}>
@@ -162,7 +166,9 @@ function DuplicatesTab() {
             <div className="d-flex gap-2">
               {!showingSelected ? (
                 <>
-                  <Button intent="primary" onClick={handleWriteSelection} disabled={Object.values(selected).filter(Boolean).length === 0}>Done</Button>
+                  <Button intent="primary" onClick={handleWriteSelection} disabled={Object.values(selected).filter(Boolean).length === 0}>
+                    Done
+                  </Button>
                   <Button
                     intent="default"
                     onClick={() => {
@@ -180,38 +186,37 @@ function DuplicatesTab() {
                   </Button>
                 </>
               ) : (
-                <Button intent="warning" onClick={async () => {
-                  try {
-                    const res = await authenticatedFetch('/api/config/duplicates/remove-all', { method: 'POST' });
-                    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-                    setDupSuccess('Files removed successfully');
-                    // reset form back to Nextcloud user selection
-                    setEntries([]);
-                    setSelected({});
-                    setShowingSelected(false);
-                    setSelectedUser('');
-                    setHasRunFind(false);
-                  } catch (e: any) {
-                    setDupError(String(e));
-                  }
-                }}>
+                <Button
+                  intent="warning"
+                  onClick={async () => {
+                    try {
+                      const res = await authenticatedFetch('/api/config/duplicates/remove-all', { method: 'POST' });
+                      if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+                      setDupSuccess('Files removed successfully');
+                      // reset form back to Nextcloud user selection
+                      setEntries([]);
+                      setSelected({});
+                      setShowingSelected(false);
+                      setSelectedUser('');
+                      setHasRunFind(false);
+                    } catch (e: any) {
+                      setDupError(String(e));
+                    }
+                  }}
+                >
                   Confirm Deletion
                 </Button>
               )}
             </div>
           </div>
           {!showingSelected && (
-            <div className="mb-2 text-muted">
-              {t('CONFIG_DUPLICATES_SUMMARY', { count: Object.values(selected).filter(Boolean).length })}
-            </div>
+            <div className="mb-2 text-muted">{t('CONFIG_DUPLICATES_SUMMARY', { count: Object.values(selected).filter(Boolean).length })}</div>
           )}
           {entries.length === 0 ? (
             <div className="text-muted">{t('CONFIG_DUPLICATES_NO_RESULTS')}</div>
           ) : (
             <div className="d-flex flex-column gap-1">
-              {showingSelected && (
-                <div className="alert alert-warning py-2 mb-1">Following items selected for deletion</div>
-              )}
+              {showingSelected && <div className="alert alert-warning py-2 mb-1">Following items selected for deletion</div>}
               {/* Table header */}
               <div className="d-flex px-2 py-1 fw-semibold" style={{ backgroundColor: 'var(--bs-secondary-bg)' }}>
                 <div style={{ width: '2rem' }}>Sel</div>
@@ -223,10 +228,17 @@ function DuplicatesTab() {
                 <div key={idx} className="d-flex align-items-center px-2 py-1 border-bottom" style={{ gap: '0.5rem' }}>
                   <div style={{ width: '2rem' }}>
                     {!showingSelected && (
-                      <input type="checkbox" className="form-check-input" checked={Boolean(selected[idx])} onChange={(e) => setSelected((prev) => ({ ...prev, [idx]: e.target.checked }))} />
+                      <input
+                        type="checkbox"
+                        className="form-check-input"
+                        checked={Boolean(selected[idx])}
+                        onChange={(e) => setSelected((prev) => ({ ...prev, [idx]: e.target.checked }))}
+                      />
                     )}
                   </div>
-                  <div className="flex-grow-1 font-monospace" style={{ wordBreak: 'break-all' }}>{it.path}</div>
+                  <div className="flex-grow-1 font-monospace" style={{ wordBreak: 'break-all' }}>
+                    {it.path}
+                  </div>
                   <div style={{ width: '10rem' }}>{it.type}</div>
                   <div
                     style={{
@@ -244,24 +256,92 @@ function DuplicatesTab() {
           )}
         </div>
       )}
-
     </div>
   );
 }
 
 // Frigate object detection classes from labelmap.txt
 const FRIGATE_OBJECTS = [
-  'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
-  'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
-  'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
-  'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
-  'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
-  'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-  'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
-  'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
-  'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
-  'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
-  'toothbrush'
+  'person',
+  'bicycle',
+  'car',
+  'motorcycle',
+  'airplane',
+  'bus',
+  'train',
+  'truck',
+  'boat',
+  'traffic light',
+  'fire hydrant',
+  'stop sign',
+  'parking meter',
+  'bench',
+  'bird',
+  'cat',
+  'dog',
+  'horse',
+  'sheep',
+  'cow',
+  'elephant',
+  'bear',
+  'zebra',
+  'giraffe',
+  'backpack',
+  'umbrella',
+  'handbag',
+  'tie',
+  'suitcase',
+  'frisbee',
+  'skis',
+  'snowboard',
+  'sports ball',
+  'kite',
+  'baseball bat',
+  'baseball glove',
+  'skateboard',
+  'surfboard',
+  'tennis racket',
+  'bottle',
+  'wine glass',
+  'cup',
+  'fork',
+  'knife',
+  'spoon',
+  'bowl',
+  'banana',
+  'apple',
+  'sandwich',
+  'orange',
+  'broccoli',
+  'carrot',
+  'hot dog',
+  'pizza',
+  'donut',
+  'cake',
+  'chair',
+  'couch',
+  'potted plant',
+  'bed',
+  'dining table',
+  'toilet',
+  'tv',
+  'laptop',
+  'mouse',
+  'remote',
+  'keyboard',
+  'cell phone',
+  'microwave',
+  'oven',
+  'toaster',
+  'sink',
+  'refrigerator',
+  'book',
+  'clock',
+  'vase',
+  'scissors',
+  'teddy bear',
+  'hair drier',
+  'toothbrush',
 ];
 
 interface CameraInput {
@@ -271,7 +351,7 @@ interface CameraInput {
 
 interface Camera {
   name: string;
-  ip?: string;  // Keep for backward compatibility
+  ip?: string; // Keep for backward compatibility
   user?: string;
   password?: string;
   objects?: string[];
@@ -337,6 +417,25 @@ export default function ConfigPage() {
 
   // Info
   const [internalIp, setInternalIp] = useState<string>('');
+  const [ipv6Loading, setIpv6Loading] = useState<boolean>(false);
+  const [ipv6Result, setIpv6Result] = useState<{ supported: boolean; ipv6?: string; message: string } | null>(null);
+
+  const handleVerifyIpv6 = async () => {
+    setIpv6Loading(true);
+    try {
+      const res = await authenticatedFetch('/api/config/verify-ipv6', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setIpv6Result({ supported: false, message: t('CONFIG_INFO_IPV6_NOT_SUPPORTED_JITSI', 'Does not support Jitsi Meet') });
+        return;
+      }
+      setIpv6Result(data);
+    } catch {
+      setIpv6Result({ supported: false, message: t('CONFIG_INFO_IPV6_NOT_SUPPORTED_JITSI', 'Does not support Jitsi Meet') });
+    } finally {
+      setIpv6Loading(false);
+    }
+  };
 
   // Frigate
   const [frigateInstalled, setFrigateInstalled] = useState<boolean>(false);
@@ -414,7 +513,7 @@ export default function ConfigPage() {
           return parsed.zfsError;
         }
         if (parsed.error) {
-          return typeof parsed.error === 'string' ? parsed.error : (parsed.error.message || JSON.stringify(parsed.error));
+          return typeof parsed.error === 'string' ? parsed.error : parsed.error.message || JSON.stringify(parsed.error);
         }
         if (parsed.message) {
           return parsed.message;
@@ -468,25 +567,28 @@ export default function ConfigPage() {
           const loadedCameras = (cfg?.cameras || []).map((camera: any) => ({
             ...camera,
             // Ensure inputs array exists and has at least one input; normalize roles to lowercase
-            inputs: camera.inputs && camera.inputs.length > 0
-              ? camera.inputs.map((i: any) => ({
-                path: i?.path || '',
-                roles: Array.isArray(i?.roles)
-                  ? i.roles.map((r: any) => String(r).toLowerCase())
-                  : []
-              }))
-              :
-              // If no inputs but we have legacy ip, create a backward-compatible input
-              camera.ip ? [{
-                path: camera.user && camera.password
-                  ? `rtsp://${encodeURIComponent(camera.user)}:${encodeURIComponent(camera.password)}@${camera.ip}`
-                  : camera.user
-                    ? `rtsp://${encodeURIComponent(camera.user)}@${camera.ip}`
-                    : `rtsp://${camera.ip}`,
-                roles: ['detect', ...(camera.record !== false ? ['record'] : [])]
-              }] : [{ path: '', roles: ['detect'] }],
+            inputs:
+              camera.inputs && camera.inputs.length > 0
+                ? camera.inputs.map((i: any) => ({
+                    path: i?.path || '',
+                    roles: Array.isArray(i?.roles) ? i.roles.map((r: any) => String(r).toLowerCase()) : [],
+                  }))
+                : // If no inputs but we have legacy ip, create a backward-compatible input
+                  camera.ip
+                  ? [
+                      {
+                        path:
+                          camera.user && camera.password
+                            ? `rtsp://${encodeURIComponent(camera.user)}:${encodeURIComponent(camera.password)}@${camera.ip}`
+                            : camera.user
+                              ? `rtsp://${encodeURIComponent(camera.user)}@${camera.ip}`
+                              : `rtsp://${camera.ip}`,
+                        roles: ['detect', ...(camera.record !== false ? ['record'] : [])],
+                      },
+                    ]
+                  : [{ path: '', roles: ['detect'] }],
             // Ensure record defaults to true
-            record: camera.record !== false
+            record: camera.record !== false,
           }));
           setCameras(loadedCameras);
         }
@@ -513,15 +615,19 @@ export default function ConfigPage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
-  const addCamera = () => setCameras((prev) => [...prev, {
-    name: '',
-    ip: '',
-    user: '',
-    password: '',
-    objects: ['person'], // Default to person
-    record: true,
-    inputs: [{ path: '', roles: ['detect'] }]
-  }]);
+  const addCamera = () =>
+    setCameras((prev) => [
+      ...prev,
+      {
+        name: '',
+        ip: '',
+        user: '',
+        password: '',
+        objects: ['person'], // Default to person
+        record: true,
+        inputs: [{ path: '', roles: ['detect'] }],
+      },
+    ]);
 
   const removeCamera = (idx: number) => setCameras((prev) => prev.filter((_, i) => i !== idx));
 
@@ -531,16 +637,16 @@ export default function ConfigPage() {
 
   // Objects dropdown functions
   const toggleObjectsDropdown = (cameraIdx: number) => {
-    setObjectsDropdownOpen(prev => ({
+    setObjectsDropdownOpen((prev) => ({
       ...prev,
-      [cameraIdx]: !prev[cameraIdx]
+      [cameraIdx]: !prev[cameraIdx],
     }));
   };
 
   const updateObjectsSearch = (cameraIdx: number, searchTerm: string) => {
-    setObjectsSearchTerm(prev => ({
+    setObjectsSearchTerm((prev) => ({
       ...prev,
-      [cameraIdx]: searchTerm
+      [cameraIdx]: searchTerm,
     }));
   };
 
@@ -548,51 +654,47 @@ export default function ConfigPage() {
     const currentObjects = cameras[cameraIdx]?.objects || [];
     const isSelected = currentObjects.includes(object);
 
-    const newObjects = isSelected
-      ? currentObjects.filter(obj => obj !== object)
-      : [...currentObjects, object];
+    const newObjects = isSelected ? currentObjects.filter((obj) => obj !== object) : [...currentObjects, object];
 
     updateCamera(cameraIdx, 'objects', newObjects);
   };
 
   const getFilteredObjects = (cameraIdx: number) => {
     const searchTerm = objectsSearchTerm[cameraIdx] || '';
-    return FRIGATE_OBJECTS.filter(obj =>
-      obj.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    return FRIGATE_OBJECTS.filter((obj) => obj.toLowerCase().includes(searchTerm.toLowerCase()));
   };
 
   const updateInput = (cameraIdx: number, inputIdx: number, field: 'path' | 'roles', value: any) => {
-    setCameras((prev) => prev.map((c, i) =>
-      i === cameraIdx
-        ? {
-          ...c,
-          inputs: (c.inputs || []).map((input, j) =>
-            j === inputIdx ? { ...input, [field]: value } : input
-          )
-        }
-        : c
-    ));
+    setCameras((prev) =>
+      prev.map((c, i) =>
+        i === cameraIdx
+          ? {
+              ...c,
+              inputs: (c.inputs || []).map((input, j) => (j === inputIdx ? { ...input, [field]: value } : input)),
+            }
+          : c,
+      ),
+    );
   };
 
   const updateInputRoles = (cameraIdx: number, inputIdx: number, role: string, checked: boolean) => {
-    setCameras((prev) => prev.map((c, i) =>
-      i === cameraIdx
-        ? {
-          ...c,
-          inputs: (c.inputs || []).map((input, j) =>
-            j === inputIdx
-              ? {
-                ...input,
-                roles: checked
-                  ? [...(input.roles || []), role]
-                  : (input.roles || []).filter(r => r !== role)
-              }
-              : input
-          )
-        }
-        : c
-    ));
+    setCameras((prev) =>
+      prev.map((c, i) =>
+        i === cameraIdx
+          ? {
+              ...c,
+              inputs: (c.inputs || []).map((input, j) =>
+                j === inputIdx
+                  ? {
+                      ...input,
+                      roles: checked ? [...(input.roles || []), role] : (input.roles || []).filter((r) => r !== role),
+                    }
+                  : input,
+              ),
+            }
+          : c,
+      ),
+    );
   };
 
   const validateCameras = () => {
@@ -608,7 +710,7 @@ export default function ConfigPage() {
       }
 
       // Require at least one non-empty input path (full RTSP URL)
-      const hasPath = (camera.inputs || []).some(inp => (inp.path || '').trim().length > 0);
+      const hasPath = (camera.inputs || []).some((inp) => (inp.path || '').trim().length > 0);
       if (!hasPath) {
         cameraErrors.inputs = t('APP_INSTALL_FORM_ERROR_REQUIRED', { label: t('CONFIG_FRIGATE_CAMERA_INPUT_PATH_LABEL') });
         hasErrors = true;
@@ -666,7 +768,6 @@ export default function ConfigPage() {
     return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   };
 
-
   const getQuotaValidationError = (shares: SmbShare[]) => {
     if (smbShares.storageTotalBytes <= 0) return '';
     const totalRequested = shares.reduce((sum, share) => {
@@ -695,35 +796,34 @@ export default function ConfigPage() {
   const normalizeSmbSharesForSave = () => {
     const usedIds = new Set<string>();
 
-    return smbShares.shares
-      .map((share) => {
-        const name = share.name.trim();
-        const existingId = share.id?.trim().toLowerCase();
-        const baseId = existingId && /^[a-z0-9][a-z0-9_-]{0,62}$/.test(existingId) ? existingId : makeSmbShareId(name);
-        let id = baseId;
-        let suffix = 2;
+    return smbShares.shares.map((share) => {
+      const name = share.name.trim();
+      const existingId = share.id?.trim().toLowerCase();
+      const baseId = existingId && /^[a-z0-9][a-z0-9_-]{0,62}$/.test(existingId) ? existingId : makeSmbShareId(name);
+      let id = baseId;
+      let suffix = 2;
 
-        while (usedIds.has(id)) {
-          const suffixText = `-${suffix++}`;
-          id = `${baseId.slice(0, 63 - suffixText.length)}${suffixText}`;
-        }
+      while (usedIds.has(id)) {
+        const suffixText = `-${suffix++}`;
+        id = `${baseId.slice(0, 63 - suffixText.length)}${suffixText}`;
+      }
 
-        usedIds.add(id);
+      usedIds.add(id);
 
-        const result: SmbShare = {
-          id,
-          name,
-          quota: share.quota.trim().toUpperCase(),
-          type: share.type,
-        };
-        if (share.dataset) {
-          result.dataset = share.dataset;
-        }
-        if (share.mountpoint) {
-          result.mountpoint = share.mountpoint;
-        }
-        return result;
-      });
+      const result: SmbShare = {
+        id,
+        name,
+        quota: share.quota.trim().toUpperCase(),
+        type: share.type,
+      };
+      if (share.dataset) {
+        result.dataset = share.dataset;
+      }
+      if (share.mountpoint) {
+        result.mountpoint = share.mountpoint;
+      }
+      return result;
+    });
   };
 
   const validateSmbShares = (shares: SmbShare[]) => {
@@ -777,7 +877,10 @@ export default function ConfigPage() {
       const nextShares = normalizeSmbSharesForSave();
       validateSmbShares(nextShares);
 
-      const payload: { enabled: boolean; shares: SmbShare[]; password?: string; deleteShares?: string[] } = { enabled: smbShares.enabled, shares: nextShares };
+      const payload: { enabled: boolean; shares: SmbShare[]; password?: string; deleteShares?: string[] } = {
+        enabled: smbShares.enabled,
+        shares: nextShares,
+      };
       if (smbPassword.trim()) payload.password = smbPassword;
       if (smbDeleteShares.length > 0) payload.deleteShares = smbDeleteShares;
 
@@ -859,25 +962,55 @@ export default function ConfigPage() {
     <div className="card d-flex">
       <Tabs value={currentTab}>
         <TabsList>
-          <TabsTrigger onClick={() => { setCurrentTab('info'); navigate(`?tab=info`, { replace: true }); }} value="info">
+          <TabsTrigger
+            onClick={() => {
+              setCurrentTab('info');
+              navigate(`?tab=info`, { replace: true });
+            }}
+            value="info"
+          >
             {t('CONFIG_INFO_TITLE')}
           </TabsTrigger>
-          <TabsTrigger onClick={() => { setCurrentTab('frigate'); navigate(`?tab=frigate`, { replace: true }); }} value="frigate">
+          <TabsTrigger
+            onClick={() => {
+              setCurrentTab('frigate');
+              navigate(`?tab=frigate`, { replace: true });
+            }}
+            value="frigate"
+          >
             {t('CONFIG_FRIGATE_TITLE')}
           </TabsTrigger>
-          <TabsTrigger onClick={() => { setCurrentTab('sync'); navigate(`?tab=sync`, { replace: true }); }} value="sync">
+          <TabsTrigger
+            onClick={() => {
+              setCurrentTab('sync');
+              navigate(`?tab=sync`, { replace: true });
+            }}
+            value="sync"
+          >
             {t('CONFIG_SYNC_TAB_TITLE')}
           </TabsTrigger>
-          <TabsTrigger onClick={() => { setCurrentTab('timemachine'); navigate(`?tab=timemachine`, { replace: true }); }} value="timemachine">
+          <TabsTrigger
+            onClick={() => {
+              setCurrentTab('timemachine');
+              navigate(`?tab=timemachine`, { replace: true });
+            }}
+            value="timemachine"
+          >
             {t('CONFIG_SMB_SHARES_TAB_TITLE')}
           </TabsTrigger>
-          <TabsTrigger onClick={() => { setCurrentTab('duplicates'); navigate(`?tab=duplicates`, { replace: true }); }} value="duplicates">
+          <TabsTrigger
+            onClick={() => {
+              setCurrentTab('duplicates');
+              navigate(`?tab=duplicates`, { replace: true });
+            }}
+            value="duplicates"
+          >
             {t('CONFIG_DUPLICATES_TAB_TITLE')}
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="info">
-          <div className="card mb-0 p-3">
+          <div className="card mb-0 p-3 d-flex flex-column gap-4">
             {loading ? (
               <div>{t('APP_ACTION_LOADING')}</div>
             ) : (
@@ -886,6 +1019,48 @@ export default function ConfigPage() {
                 <div className="fs-4">{internalIp || 'Unknown'}</div>
               </div>
             )}
+
+            <div className="border-top pt-3">
+              <h4 className="mb-3">{t('CONFIG_INFO_IPV6_VERIFY_LABEL', 'IPv6 Verification')}</h4>
+              <div className="d-flex align-items-center gap-2 mb-3">
+                <Button intent="primary" onClick={handleVerifyIpv6} disabled={ipv6Loading}>
+                  {ipv6Loading ? t('CONFIG_INFO_VERIFYING_IPV6', 'Verifying...') : t('CONFIG_INFO_VERIFY_IPV6_BTN', 'Verify IPv6')}
+                </Button>
+              </div>
+
+              {ipv6Result && (
+                <div className="d-flex flex-column gap-2">
+                  {ipv6Result.supported && ipv6Result.ipv6 ? (
+                    <>
+                      <div className="alert alert-success d-flex align-items-center gap-2 m-0" role="alert">
+                        <span className="fw-bold">{t('CONFIG_INFO_IPV6_SUPPORTS_JITSI', 'Supports Jitsi Meet')}</span>
+                      </div>
+                      <div className="d-flex align-items-center gap-2">
+                        <span className="text-muted">{t('CONFIG_INFO_IPV6_ADDRESS_LABEL', 'IPv6 Address')}:</span>
+                        <code className="fs-5">{ipv6Result.ipv6}</code>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            const ok = await copyTextToClipboard(ipv6Result.ipv6 || '');
+                            if (ok) {
+                              toast.success(t('UTILITY_COPIED_TO_CLIPBOARD', 'Copied to clipboard!'));
+                            }
+                          }}
+                          aria-label="Copy IPv6 Address"
+                        >
+                          <IconCopy size={16} />
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="alert alert-danger d-flex align-items-center gap-2 m-0" role="alert">
+                      <span className="fw-bold">{t('CONFIG_INFO_IPV6_NOT_SUPPORTED_JITSI', 'Does not support Jitsi Meet')}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </TabsContent>
 
@@ -922,17 +1097,11 @@ export default function ConfigPage() {
                           onChange={(e) => updateCamera(idx, 'name', e.target.value)}
                           required
                         />
-                        {validationErrors[idx]?.name && (
-                          <div className="invalid-feedback">{validationErrors[idx].name}</div>
-                        )}
+                        {validationErrors[idx]?.name && <div className="invalid-feedback">{validationErrors[idx].name}</div>}
                       </div>
                       <div className="col-md-3">
                         <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_IP_LABEL')}</label>
-                        <input
-                          className={`form-control`}
-                          value={cam.ip}
-                          onChange={(e) => updateCamera(idx, 'ip', e.target.value)}
-                        />
+                        <input className={`form-control`} value={cam.ip} onChange={(e) => updateCamera(idx, 'ip', e.target.value)} />
                       </div>
                       <div className="col-md-3">
                         <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_USER_LABEL')}</label>
@@ -940,7 +1109,12 @@ export default function ConfigPage() {
                       </div>
                       <div className="col-md-3">
                         <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_PASSWORD_LABEL')}</label>
-                        <input className="form-control" type="password" value={cam.password || ''} onChange={(e) => updateCamera(idx, 'password', e.target.value)} />
+                        <input
+                          className="form-control"
+                          type="password"
+                          value={cam.password || ''}
+                          onChange={(e) => updateCamera(idx, 'password', e.target.value)}
+                        />
                       </div>
                       <div className="col-md-6">
                         <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_OBJECTS_LABEL')}</label>
@@ -951,7 +1125,7 @@ export default function ConfigPage() {
                             style={{ minHeight: '38px', cursor: 'pointer' }}
                           >
                             {(cam.objects || []).length > 0 ? (
-                              (cam.objects || []).map(obj => (
+                              (cam.objects || []).map((obj) => (
                                 <span key={obj} className="badge bg-primary text-white d-flex align-items-center gap-1">
                                   {obj}
                                   <button
@@ -971,12 +1145,14 @@ export default function ConfigPage() {
                           </div>
 
                           {objectsDropdownOpen[idx] && (
-                            <div className={`position-absolute w-100 border border-top-0 shadow-sm objects-menu ${isDarkMode ? 'bg-dark' : 'bg-white'}`}
+                            <div
+                              className={`position-absolute w-100 border border-top-0 shadow-sm objects-menu ${isDarkMode ? 'bg-dark' : 'bg-white'}`}
                               style={{
                                 zIndex: 1000,
                                 maxHeight: '200px',
-                                overflowY: 'auto'
-                              }}>
+                                overflowY: 'auto',
+                              }}
+                            >
                               <div className="p-2 border-bottom" style={{ borderColor: 'var(--bs-border-color)' }}>
                                 <input
                                   className="form-control form-control-sm"
@@ -988,29 +1164,28 @@ export default function ConfigPage() {
                               </div>
 
                               <div className="list-group list-group-flush">
-                                {getFilteredObjects(idx).map(object => (
+                                {getFilteredObjects(idx).map((object) => (
                                   <button
                                     key={object}
                                     type="button"
-                                    className={`list-group-item list-group-item-action d-flex align-items-center gap-2 ${(cam.objects || []).includes(object) ? 'active' : ''
-                                      } objects-menu-item`}
+                                    className={`list-group-item list-group-item-action d-flex align-items-center gap-2 ${
+                                      (cam.objects || []).includes(object) ? 'active' : ''
+                                    } objects-menu-item`}
                                     onClick={() => toggleObjectSelection(idx, object)}
                                   >
                                     <input
                                       type="checkbox"
                                       className="form-check-input"
                                       checked={(cam.objects || []).includes(object)}
-                                      onChange={() => { }}
+                                      onChange={() => {}}
                                       style={{
-                                        backgroundColor: (cam.objects || []).includes(object)
-                                          ? 'var(--bs-white)'
-                                          : 'transparent',
-                                        borderColor: (cam.objects || []).includes(object)
-                                          ? 'var(--bs-white)'
-                                          : 'var(--bs-border-color)'
+                                        backgroundColor: (cam.objects || []).includes(object) ? 'var(--bs-white)' : 'transparent',
+                                        borderColor: (cam.objects || []).includes(object) ? 'var(--bs-white)' : 'var(--bs-border-color)',
                                       }}
                                     />
-                                    <span className="text-capitalize" style={{ fontSize: '0.875rem', fontWeight: '500' }}>{object}</span>
+                                    <span className="text-capitalize" style={{ fontSize: '0.875rem', fontWeight: '500' }}>
+                                      {object}
+                                    </span>
                                   </button>
                                 ))}
                               </div>
@@ -1020,7 +1195,11 @@ export default function ConfigPage() {
                       </div>
                       <div className="col-md-3">
                         <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_RECORD_LABEL')}</label>
-                        <select className="form-select" value={cam.record !== false ? 'true' : 'false'} onChange={(e) => updateCamera(idx, 'record', e.target.value === 'true')}>
+                        <select
+                          className="form-select"
+                          value={cam.record !== false ? 'true' : 'false'}
+                          onChange={(e) => updateCamera(idx, 'record', e.target.value === 'true')}
+                        >
                           <option value="true">{t('CONFIG_FRIGATE_CAMERA_RECORD_ENABLED')}</option>
                           <option value="false">{t('CONFIG_FRIGATE_CAMERA_RECORD_DISABLED')}</option>
                         </select>
@@ -1039,11 +1218,7 @@ export default function ConfigPage() {
                       </div>
 
                       {(cam.inputs || []).map((input, inputIdx) => (
-                        <div
-                          key={inputIdx}
-                          className="card mb-2 p-2"
-                          style={{ backgroundColor: 'var(--bs-secondary-bg)' }}
-                        >
+                        <div key={inputIdx} className="card mb-2 p-2" style={{ backgroundColor: 'var(--bs-secondary-bg)' }}>
                           <div className="row g-2 align-items-end">
                             <div className="col-md-6">
                               <label className="form-label">{t('CONFIG_FRIGATE_CAMERA_INPUT_PATH_LABEL')}</label>
@@ -1127,9 +1302,7 @@ export default function ConfigPage() {
               <Button intent="primary" disabled={!jellyfinInstalled} onClick={() => setSyncDialogOpen(true)}>
                 {t('CONFIG_SYNC_BUTTON')}
               </Button>
-              {!jellyfinInstalled && (
-                <span className="text-muted d-flex align-items-center">{t('CONFIG_SYNC_JELLYFIN_NOT_INSTALLED')}</span>
-              )}
+              {!jellyfinInstalled && <span className="text-muted d-flex align-items-center">{t('CONFIG_SYNC_JELLYFIN_NOT_INSTALLED')}</span>}
             </div>
           </div>
         </TabsContent>
@@ -1168,9 +1341,7 @@ export default function ConfigPage() {
                         </Button>
                       </div>
                     </div>
-                    {!smbShares.enabled && (
-                      <div className="mt-2 text-muted mb-3">{t('CONFIG_SMB_ENABLE_HINT')}</div>
-                    )}
+                    {!smbShares.enabled && <div className="mt-2 text-muted mb-3">{t('CONFIG_SMB_ENABLE_HINT')}</div>}
 
                     {totalBytes > 0 && (
                       <div className="card p-3 mb-3 border bg-light-subtle">
@@ -1226,20 +1397,12 @@ export default function ConfigPage() {
 
                       <div className="d-flex align-items-center justify-content-between mb-2">
                         <h5 className="m-0">{t('CONFIG_SMB_MANAGE_SHARES_TITLE')}</h5>
-                        <Button
-                          type="button"
-                          intent="primary"
-                          size="sm"
-                          onClick={addSmbShare}
-                          disabled={smbSaving}
-                        >
+                        <Button type="button" intent="primary" size="sm" onClick={addSmbShare} disabled={smbSaving}>
                           + {t('CONFIG_SMB_ADD_SHARE_BUTTON')}
                         </Button>
                       </div>
 
-                      <div className="mb-3 text-muted">
-                        {smbShares.message || t('CONFIG_SMB_STATUS', { status: smbShares.status })}
-                      </div>
+                      <div className="mb-3 text-muted">{smbShares.message || t('CONFIG_SMB_STATUS', { status: smbShares.status })}</div>
 
                       <div className="d-flex flex-column gap-2 mb-3">
                         {smbShares.shares.map((share, idx) => {
@@ -1267,11 +1430,7 @@ export default function ConfigPage() {
                                 </div>
                                 <div className="col-md-3">
                                   <label className="form-label">{t('CONFIG_SMB_SHARE_TYPE')}</label>
-                                  <select
-                                    className="form-select"
-                                    value={share.type}
-                                    onChange={(e) => updateSmbShareRow(idx, 'type', e.target.value)}
-                                  >
+                                  <select className="form-select" value={share.type} onChange={(e) => updateSmbShareRow(idx, 'type', e.target.value)}>
                                     <option value="macos">{t('CONFIG_SMB_SHARE_TYPE_MACOS')}</option>
                                     <option value="windows">{t('CONFIG_SMB_SHARE_TYPE_WINDOWS')}</option>
                                   </select>
@@ -1296,25 +1455,17 @@ export default function ConfigPage() {
                                   </Button>
                                 </div>
                               </div>
-                              {applied?.dataset && (
-                                <div className="mt-2 text-muted font-monospace">
-                                  {applied.dataset}
-                                </div>
-                              )}
+                              {applied?.dataset && <div className="mt-2 text-muted font-monospace">{applied.dataset}</div>}
                             </div>
                           );
                         })}
                         {smbShares.shares.length === 0 && (
-                          <div className="text-center py-4 border rounded text-muted d-flex flex-column align-items-center gap-2" style={{ borderStyle: 'dashed' }}>
+                          <div
+                            className="text-center py-4 border rounded text-muted d-flex flex-column align-items-center gap-2"
+                            style={{ borderStyle: 'dashed' }}
+                          >
                             <span>{t('CONFIG_SMB_NO_SHARES')}</span>
-                            <Button
-                              type="button"
-                              intent="secondary"
-                              variant="outline"
-                              size="sm"
-                              onClick={addSmbShare}
-                              disabled={smbSaving}
-                            >
+                            <Button type="button" intent="secondary" variant="outline" size="sm" onClick={addSmbShare} disabled={smbSaving}>
                               + {t('CONFIG_SMB_ADD_SHARE_BUTTON')}
                             </Button>
                           </div>
@@ -1386,17 +1537,18 @@ export default function ConfigPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(smbDeleteTarget)} onOpenChange={(open) => {
-        if (!open) setSmbDeleteTarget(null);
-      }}>
+      <Dialog
+        open={Boolean(smbDeleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) setSmbDeleteTarget(null);
+        }}
+      >
         <DialogContent size="sm" type="danger">
           <DialogHeader>
             <DialogTitle>{t('CONFIG_SMB_DELETE_DIALOG_TITLE')}</DialogTitle>
           </DialogHeader>
           <DialogDescription>
-            <span className="text-muted">
-              {t('CONFIG_SMB_DELETE_DIALOG_SUBTITLE', { name: smbDeleteTarget?.name || '' })}
-            </span>
+            <span className="text-muted">{t('CONFIG_SMB_DELETE_DIALOG_SUBTITLE', { name: smbDeleteTarget?.name || '' })}</span>
           </DialogDescription>
           <DialogFooter>
             <Button onClick={() => setSmbDeleteTarget(null)}>{t('ACTIONS_CANCEL')}</Button>
