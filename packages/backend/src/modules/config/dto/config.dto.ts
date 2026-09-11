@@ -183,8 +183,17 @@ export class TimeMachineStatusDto extends createArkDto(timeMachineStatusSchema, 
 
 /* ---------- SMB Shares ---------- */
 const smbShareSchema = type({
+  id: 'string > 0',
   name: 'string > 0',
   quota: 'string > 0',
+  type: 'string?',
+  dataset: 'string?',
+  mountpoint: 'string?',
+});
+
+const smbShareUpdateSchema = type({
+  name: 'string?',
+  quota: 'string?',
   type: 'string?',
 });
 
@@ -196,6 +205,7 @@ const smbSharesConfigSchema = type({
 });
 
 const smbShareStatusSchema = type({
+  id: 'string',
   name: 'string',
   quota: 'string',
   type: 'string',
@@ -204,6 +214,7 @@ const smbShareStatusSchema = type({
 });
 
 const smbQuotaDetailsSchema = type({
+  id: 'string?',
   share: 'string?',
   dataset: 'string?',
   requestedQuota: 'string?',
@@ -227,4 +238,5 @@ const smbSharesStatusSchema = type({
 });
 
 export class SmbSharesConfigDto extends createArkDto(smbSharesConfigSchema, { name: 'SmbSharesConfigDto', input: true }) {}
+export class SmbShareUpdateDto extends createArkDto(smbShareUpdateSchema, { name: 'SmbShareUpdateDto', input: true }) {}
 export class SmbSharesStatusDto extends createArkDto(smbSharesStatusSchema, { name: 'SmbSharesStatusDto' }) {}

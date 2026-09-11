@@ -52,4 +52,18 @@ describe('AppStoreService', () => {
     expect(appStoreRepository.createAppStore).not.toHaveBeenCalled();
     expect(repoHelpers.cloneRepo).not.toHaveBeenCalled();
   });
+
+  it('reports app store pull failures instead of masking them', async () => {
+    appStoreRepository.getEnabledAppStores.mockResolvedValue([
+      fromAny({ slug: 'primary', url: 'https://example.com/primary.git', hash: 'primary', name: 'Primary', enabled: true }),
+      fromAny({ slug: 'secondary', url: 'https://example.com/secondary.git', hash: 'secondary', name: 'Secondary', enabled: true }),
+    ]);
+    repoHelpers.pullRepo
+      .mockResolvedValueOnce({ success: true, message: '' })
+      .mockResolvedValueOnce({ success: false, message: 'getaddrinfo EAI_AGAIN github.com' });
+
+    const result = await appStoreService.pullRepositories();
+
+    expect(result).toEqual({ success: false, message: 'secondary: getaddrinfo EAI_AGAIN github.com' });
+  });
 });

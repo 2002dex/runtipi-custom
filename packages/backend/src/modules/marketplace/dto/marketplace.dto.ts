@@ -44,6 +44,7 @@ const appDetailsSchema = type({
 
 const successResponseSchema = type({
   success: 'boolean',
+  message: 'string?',
 });
 
 const appStoreSchema = type({

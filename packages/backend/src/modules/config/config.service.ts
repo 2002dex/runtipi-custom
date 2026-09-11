@@ -24,7 +24,7 @@ const SMB_SHARES_DEFAULTS = {
   status: 'not_configured',
 } as const;
 
-type SmbShare = { name: string; quota: string; type: 'macos' | 'windows' };
+type SmbShare = { id: string; name: string; quota: string; type: 'macos' | 'windows'; dataset?: string; mountpoint?: string };
 
 @Injectable()
 export class ConfigService {
@@ -327,29 +327,53 @@ export class ConfigService {
     return normalized;
   }
 
-  private normalizeSmbShareName(name: unknown) {
-    const normalized = String(name || '').trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(normalized)) {
-      throw new Error('Share name must start with a letter or number and contain only letters, numbers, underscores, and dashes');
+  private normalizeSmbShareId(id: unknown) {
+    const normalized = String(id || '').trim();
+    if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(normalized)) {
+      throw new Error('Share id must start with a lowercase letter or number and contain only lowercase letters, numbers, underscores, and dashes');
     }
 
     return normalized;
   }
 
-  private normalizeSmbShares(shares: Array<{ name: string; quota: string; type?: string }>): SmbShare[] {
-    const seen = new Set<string>();
+  private normalizeSmbShareName(name: unknown) {
+    const normalized = String(name || '').trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9_ -]{0,62}$/.test(normalized)) {
+      throw new Error('Share name must start with a letter or number and contain only letters, numbers, spaces, underscores, and dashes');
+    }
+
+    return normalized;
+  }
+
+  private normalizeSmbShares(shares: Array<{ id?: string; name: string; quota: string; type?: string; dataset?: string; mountpoint?: string }>): SmbShare[] {
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
     const normalizedShares = (shares || []).map((share) => {
-      const normalized = {
+      const normalized: SmbShare = {
+        id: this.normalizeSmbShareId(share.id),
         name: this.normalizeSmbShareName(share.name),
         quota: this.normalizeTimeMachineQuota(share.quota),
         type: this.normalizeSmbShareType(share.type),
       };
 
-      const key = normalized.name.toLowerCase();
-      if (seen.has(key)) {
+      if (typeof share.dataset === 'string' && share.dataset.trim()) {
+        normalized.dataset = share.dataset.trim();
+      }
+      if (typeof share.mountpoint === 'string' && share.mountpoint.trim()) {
+        normalized.mountpoint = share.mountpoint.trim();
+      }
+
+      const idKey = normalized.id.toLowerCase();
+      if (seenIds.has(idKey)) {
+        throw new Error(`Duplicate share id: ${normalized.id}`);
+      }
+      seenIds.add(idKey);
+
+      const nameKey = normalized.name.toLowerCase();
+      if (seenNames.has(nameKey)) {
         throw new Error(`Duplicate share name: ${normalized.name}`);
       }
-      seen.add(key);
+      seenNames.add(nameKey);
 
       return normalized;
     });
@@ -404,7 +428,7 @@ export class ConfigService {
     } catch {
       const timeMachine = await this.readTimeMachineDesiredConfig();
       if (timeMachine.enabled) {
-        return { enabled: true, shares: [{ name: 'TimeMachine', quota: timeMachine.quota, type: 'macos' }] };
+        return { enabled: true, shares: [{ id: 'timemachine', name: 'TimeMachine', quota: timeMachine.quota, type: 'macos' }] };
       }
 
       return { enabled: SMB_SHARES_DEFAULTS.enabled, shares: [] };
@@ -446,13 +470,13 @@ export class ConfigService {
     return this.buildSmbSharesResponse(desired, latestStatus, await this.getSmbStorageInfo());
   }
 
-  async writeSmbSharesConfig(body: { enabled: boolean; password?: string; deleteShares?: string[]; shares: Array<{ name: string; quota: string; type?: string }> }) {
+  async writeSmbSharesConfig(body: { enabled: boolean; password?: string; deleteShares?: string[]; shares: Array<{ id?: string; name: string; quota: string; type?: string; dataset?: string; mountpoint?: string }> }) {
     const desired = {
       enabled: Boolean(body.enabled),
       shares: this.normalizeSmbShares(body.shares || []),
     };
     const password = typeof body.password === 'string' ? body.password : '';
-    const deleteShares = Array.from(new Set((body.deleteShares || []).map((name) => this.normalizeSmbShareName(name))));
+    const deleteShares = Array.from(new Set((body.deleteShares || []).map((id) => this.normalizeSmbShareId(id))));
     const storage = await this.getSmbStorageInfo();
 
     if (storage.storageTotalBytes > 0) {
@@ -462,18 +486,22 @@ export class ConfigService {
       }
     }
 
-    const payload: { enabled: boolean; username: string; shares: SmbShare[]; password?: string; deleteShares?: string[]; updatedAt: string } = {
+    const activeIds = new Set(desired.shares.map((share) => share.id));
+    const conflictingDelete = deleteShares.find((id) => activeIds.has(id));
+    if (conflictingDelete) {
+      throw new Error(`Share ${conflictingDelete} exists in both shares and deleteShares`);
+    }
+
+    const payload: { enabled: boolean; username: string; shares: SmbShare[]; password?: string; deleteShares: string[]; updatedAt: string } = {
       enabled: desired.enabled,
       username: SMB_SHARES_DEFAULTS.username,
       shares: desired.shares,
+      deleteShares,
       updatedAt: new Date().toISOString(),
     };
 
     if (password.trim()) {
       payload.password = password;
-    }
-    if (deleteShares.length > 0) {
-      payload.deleteShares = deleteShares;
     }
 
     const configFile = path.join(this.getStateDir(), 'shares.json');
@@ -489,30 +517,62 @@ export class ConfigService {
     return this.buildSmbSharesResponse(desired, appliedStatus, storage);
   }
 
+  async updateSmbShare(id: string, body: { name?: string; quota?: string; type?: string }) {
+    const shareId = this.normalizeSmbShareId(id);
+    const desired = await this.readSmbSharesDesiredConfig();
+    const shareIndex = desired.shares.findIndex((share) => share.id === shareId);
+    if (shareIndex === -1) {
+      throw new Error(`SMB share not found: ${shareId}`);
+    }
+    const existingShare = desired.shares[shareIndex];
+    if (!existingShare) {
+      throw new Error(`SMB share not found: ${shareId}`);
+    }
+
+    const nextShares = [...desired.shares];
+    const updatedShare = this.normalizeSmbShares([{
+      id: shareId,
+      name: body.name ?? existingShare.name,
+      quota: body.quota ?? existingShare.quota,
+      type: body.type ?? existingShare.type,
+      dataset: existingShare.dataset,
+      mountpoint: existingShare.mountpoint,
+    }])[0];
+    if (!updatedShare) {
+      throw new Error('Invalid SMB share update');
+    }
+    nextShares[shareIndex] = updatedShare;
+
+    return this.writeSmbSharesConfig({
+      enabled: desired.enabled,
+      shares: nextShares,
+    });
+  }
+
   private buildSmbSharesResponse(desired: { enabled: boolean; shares: SmbShare[] }, latestStatus: Record<string, unknown>, storage: { storageTotalBytes: number; storageFreeBytes: number }) {
     const statusAppliedShares = Array.isArray(latestStatus.appliedShares)
       ? latestStatus.appliedShares
           .filter((share: any) => share && typeof share === 'object')
           .map((share: any) => ({
+            id: typeof share.id === 'string' ? share.id : '',
             name: typeof share.name === 'string' ? share.name : '',
             quota: typeof share.quota === 'string' ? share.quota : '',
             type: typeof share.type === 'string' ? share.type : 'macos',
             dataset: typeof share.dataset === 'string' ? share.dataset : '',
             mountpoint: typeof share.mountpoint === 'string' ? share.mountpoint : '',
           }))
-          .filter((share) => share.name && share.quota && share.dataset && share.mountpoint)
+          .filter((share) => share.id && share.name && share.quota && share.dataset && share.mountpoint)
       : [];
-    const appliedByName = new Map(statusAppliedShares.map((share) => [share.name.toLowerCase(), share]));
+    const appliedById = new Map(statusAppliedShares.map((share) => [share.id, share]));
     const appliedShares = desired.enabled
       ? desired.shares.map((share) => {
-          const applied = appliedByName.get(share.name.toLowerCase());
+          const applied = appliedById.get(share.id);
           if (applied) return applied;
 
-          const slug = share.name.toLowerCase();
           return {
             ...share,
-            dataset: `mypool/backup/${slug}`,
-            mountpoint: `/mnt/${slug}`,
+            dataset: `mypool/${share.id}`,
+            mountpoint: `/mnt/backup/${share.id}`,
           };
         })
       : [];
@@ -521,7 +581,7 @@ export class ConfigService {
       enabled: boolean;
       username: string;
       shares: SmbShare[];
-      appliedShares: Array<{ name: string; quota: string; type: string; dataset: string; mountpoint: string }>;
+      appliedShares: Array<{ id: string; name: string; quota: string; type: string; dataset: string; mountpoint: string }>;
       passwordSet: boolean;
       storageTotalBytes: number;
       storageFreeBytes: number;
@@ -529,6 +589,7 @@ export class ConfigService {
       message?: string;
       error?: string;
       quotaDetails?: {
+        id?: string;
         share?: string;
         dataset?: string;
         requestedQuota?: string;
@@ -556,6 +617,7 @@ export class ConfigService {
     if (latestStatus.quotaDetails && typeof latestStatus.quotaDetails === 'object' && !Array.isArray(latestStatus.quotaDetails)) {
       const details = latestStatus.quotaDetails as Record<string, unknown>;
       response.quotaDetails = {
+        id: typeof details.id === 'string' ? details.id : undefined,
         share: typeof details.share === 'string' ? details.share : undefined,
         dataset: typeof details.dataset === 'string' ? details.dataset : undefined,
         requestedQuota: typeof details.requestedQuota === 'string' ? details.requestedQuota : undefined,

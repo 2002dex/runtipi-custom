@@ -85,7 +85,7 @@ export class MarketplaceController {
   @ApiResponse({ type: PullDto })
   async pullAppStores() {
     const res = await this.appStoreService.pullRepositories();
-    await this.marketplaceService.initialize();
+    await this.marketplaceService.initialize({ pullRepositories: false });
     return PullDto.parse(res, { reportOnly: true });
   }
 

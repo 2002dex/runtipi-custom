@@ -268,7 +268,7 @@ export default function ExternalUsbPage() {
         <Button intent="primary" onClick={onScan} disabled={loading}>
           {t('EXTERNAL_USB_SCAN_BUTTON')}
         </Button>
-        {loading && <div>Reading data...</div>}
+        {loading && <div>Scanning devices...</div>}
       </div>
 
       {devices.length === 0 ? (

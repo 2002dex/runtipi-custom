@@ -125,13 +125,16 @@ export class ReposHelpers {
    * @param {string} repoUrl
    */
   public async pullRepo(repoUrl: string, slug: string) {
+    const { dataDir } = this.configuration.get('directories');
+    const repoPath = path.join(dataDir, 'repos', slug);
+
     try {
-      await this.cloneRepo(repoUrl, slug);
+      const cloneResult = await this.cloneRepo(repoUrl, slug);
+      if (!cloneResult.success) {
+        return cloneResult;
+      }
 
       const [remoteUrl] = this.getRepoBaseUrlAndBranch(repoUrl);
-
-      const { dataDir } = this.configuration.get('directories');
-      const repoPath = path.join(dataDir, 'repos', slug);
 
       if (!(await this.filesystem.pathExists(repoPath))) {
         this.logger.info(`Repo ${repoUrl} does not exist`);
@@ -185,10 +188,12 @@ export class ReposHelpers {
 
       this.logger.debug(`Pulled repo ${repoUrl} to ${repoPath}`);
       return { success: true, message: '' };
-    } catch (_) {
-      if (this.configuration.get('__prod__')) {
-        await this.deleteRepo(slug);
+    } catch (err) {
+      if (await this.filesystem.pathExists(repoPath)) {
+        this.logger.warn(`Failed to pull repo ${repoUrl}; keeping existing repo at ${repoPath}`);
+        return this.handleRepoError(err);
       }
+
       return this.cloneRepo(repoUrl, slug);
     }
   }

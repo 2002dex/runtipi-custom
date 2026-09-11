@@ -42,7 +42,9 @@ export class MarketplaceService {
     private readonly appStoreService: AppStoreService,
   ) {}
 
-  async initialize() {
+  async initialize(options: { pullRepositories?: boolean } = {}) {
+    const { pullRepositories = true } = options;
+
     this.stores.clear();
 
     const stores = await this.appStoreService.getAllAppStores();
@@ -69,7 +71,9 @@ export class MarketplaceService {
       }
     }
 
-    await this.appStoreService.pullRepositories();
+    if (pullRepositories) {
+      await this.appStoreService.pullRepositories();
+    }
     this.invalidateCache();
 
     this.logger.debug('Marketplace service initialized with stores', Array.from(this.stores.keys()).join(', '));

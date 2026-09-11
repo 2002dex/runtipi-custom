@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Put, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@/modules/auth/auth.guard';
 import { ConfigService as AppConfigService } from './config.service';
@@ -23,6 +23,7 @@ import {
   InstalledAppsDto,
   TimeMachineConfigDto,
   TimeMachineStatusDto,
+  SmbShareUpdateDto,
   SmbSharesConfigDto,
   SmbSharesStatusDto,
 } from './dto/config.dto';
@@ -234,5 +235,28 @@ export class ConfigController {
     if (!validatedBody?.device) throw new HttpException('device is required', HttpStatus.BAD_REQUEST);
     const res = await this.cfg.unmountUsbDevice(validatedBody.device);
     return UsbOpDto.parse(res, { reportOnly: true });
+  }
+}
+
+@Controller('shares')
+@UseGuards(AuthGuard)
+export class SmbSharesController {
+  constructor(private readonly cfg: AppConfigService) {}
+
+  @Patch(':id')
+  @ApiResponse({ type: SmbSharesStatusDto })
+  async updateSmbShare(@Param('id') id: string, @Body() body: SmbShareUpdateDto): Promise<SmbSharesStatusDto> {
+    if (body && Object.prototype.hasOwnProperty.call(body, 'id')) {
+      throw new HttpException('Share id is immutable and must be provided in the route', HttpStatus.BAD_REQUEST);
+    }
+
+    const validatedBody = SmbShareUpdateDto.parse(body, { reportOnly: true });
+    try {
+      const res = await this.cfg.updateSmbShare(id, validatedBody);
+      return SmbSharesStatusDto.parse(res, { reportOnly: true });
+    } catch (e: any) {
+      const status = String(e?.message || '').includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+      throw new HttpException(e?.message || 'Invalid SMB share update', status);
+    }
   }
 }

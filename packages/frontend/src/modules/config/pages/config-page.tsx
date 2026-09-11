@@ -280,13 +280,17 @@ interface Camera {
 }
 
 interface SmbShare {
+  id?: string;
   name: string;
   quota: string;
   type: 'macos' | 'windows';
+  dataset?: string;
+  mountpoint?: string;
   uiId?: string;
 }
 
 interface SmbAppliedShare extends SmbShare {
+  id: string;
   dataset: string;
   mountpoint: string;
 }
@@ -303,6 +307,7 @@ interface SmbSharesStatus {
   message?: string;
   error?: string;
   quotaDetails?: {
+    id?: string;
     share?: string;
     dataset?: string;
     requestedQuota?: string;
@@ -394,13 +399,13 @@ export default function ConfigPage() {
     };
   }, []);
 
-  const extractZfsError = (errorStr: string, quotaDetails?: SmbSharesStatus['quotaDetails']): string => {
+  const extractSmbMessage = (messageStr: string, quotaDetails?: SmbSharesStatus['quotaDetails']): string => {
     if (quotaDetails?.zfsError) {
       return quotaDetails.zfsError;
     }
-    if (!errorStr) return '';
+    if (!messageStr) return '';
     try {
-      const parsed = JSON.parse(errorStr);
+      const parsed = JSON.parse(messageStr);
       if (parsed) {
         if (parsed.quotaDetails?.zfsError) {
           return parsed.quotaDetails.zfsError;
@@ -418,12 +423,12 @@ export default function ConfigPage() {
     } catch {
       // Not a JSON string
     }
-    return errorStr;
+    return messageStr;
   };
 
   useEffect(() => {
     if (smbError) {
-      const zfsErrMsg = extractZfsError(smbError);
+      const zfsErrMsg = extractSmbMessage(smbError);
       if (zfsErrMsg) {
         toast.error(zfsErrMsg);
       }
@@ -433,7 +438,7 @@ export default function ConfigPage() {
 
   useEffect(() => {
     if (smbShares.error) {
-      const zfsErrMsg = extractZfsError(smbShares.error, smbShares.quotaDetails);
+      const zfsErrMsg = extractSmbMessage(smbShares.error, smbShares.quotaDetails);
       if (zfsErrMsg) {
         toast.error(zfsErrMsg);
       }
@@ -674,20 +679,64 @@ export default function ConfigPage() {
     return '';
   };
 
-  const normalizeSmbSharesForSave = () => smbShares.shares
-    .map((share) => ({
-      name: share.name.trim(),
-      quota: share.quota.trim().toUpperCase(),
-      type: share.type,
-    }))
-    .filter((share) => share.name || share.quota !== '500G');
+  const makeSmbShareId = (name: string) => {
+    const slug = name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^[^a-z0-9]+/, '')
+      .replace(/-+/g, '-')
+      .replace(/[-_]+$/g, '')
+      .slice(0, 63);
+
+    return slug || `share-${Date.now()}`;
+  };
+
+  const normalizeSmbSharesForSave = () => {
+    const usedIds = new Set<string>();
+
+    return smbShares.shares
+      .map((share) => {
+        const name = share.name.trim();
+        const existingId = share.id?.trim().toLowerCase();
+        const baseId = existingId && /^[a-z0-9][a-z0-9_-]{0,62}$/.test(existingId) ? existingId : makeSmbShareId(name);
+        let id = baseId;
+        let suffix = 2;
+
+        while (usedIds.has(id)) {
+          const suffixText = `-${suffix++}`;
+          id = `${baseId.slice(0, 63 - suffixText.length)}${suffixText}`;
+        }
+
+        usedIds.add(id);
+
+        const result: SmbShare = {
+          id,
+          name,
+          quota: share.quota.trim().toUpperCase(),
+          type: share.type,
+        };
+        if (share.dataset) {
+          result.dataset = share.dataset;
+        }
+        if (share.mountpoint) {
+          result.mountpoint = share.mountpoint;
+        }
+        return result;
+      });
+  };
 
   const validateSmbShares = (shares: SmbShare[]) => {
+    const seenIds = new Set<string>();
     const seen = new Set<string>();
-    const namePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
+    const idPattern = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+    const namePattern = /^[A-Za-z0-9][A-Za-z0-9_ -]{0,62}$/;
     const quotaPattern = /^[1-9][0-9]*(M|G|T)$/;
 
     for (const share of shares) {
+      if (!share.id || !idPattern.test(share.id)) {
+        throw new Error(t('CONFIG_SMB_SHARE_NAME_INVALID'));
+      }
       if (!namePattern.test(share.name)) {
         throw new Error(t('CONFIG_SMB_SHARE_NAME_INVALID'));
       }
@@ -697,6 +746,11 @@ export default function ConfigPage() {
       if (share.type !== 'macos' && share.type !== 'windows') {
         throw new Error(t('CONFIG_SMB_SHARE_TYPE_INVALID'));
       }
+
+      if (seenIds.has(share.id)) {
+        throw new Error(t('CONFIG_SMB_SHARE_NAME_DUPLICATE'));
+      }
+      seenIds.add(share.id);
 
       const key = share.name.toLowerCase();
       if (seen.has(key)) {
@@ -708,6 +762,12 @@ export default function ConfigPage() {
     const quotaError = getQuotaValidationError(shares);
     if (quotaError) throw new Error(quotaError);
   };
+
+  useEffect(() => {
+    if (smbSuccess) {
+      toast.success(smbSuccess);
+    }
+  }, [smbSuccess]);
 
   const saveSmbSharesConfig = async () => {
     setSmbSaving(true);
@@ -733,9 +793,10 @@ export default function ConfigPage() {
       if (data?.status === 'error' || data?.error) {
         return false;
       }
+      const successMessage = data?.message || t('CONFIG_SMB_SHARES_SAVED');
       setSmbPassword('');
       setSmbDeleteShares([]);
-      setSmbSuccess(t('CONFIG_SMB_SHARES_SAVED'));
+      setSmbSuccess(successMessage);
       return true;
     } catch (e: any) {
       setSmbError(String(e?.message || e));
@@ -745,14 +806,19 @@ export default function ConfigPage() {
     }
   };
 
-  const removeSmbShare = (name: string) => {
-    const normalizedName = name.trim();
+  const removeSmbShare = (shareToRemove: SmbShare) => {
+    const normalizedId = shareToRemove.id?.trim().toLowerCase();
     setSmbShares((prev) => ({
       ...prev,
-      shares: prev.shares.filter((share) => share.name !== name),
+      shares: prev.shares.filter((share) => {
+        if (shareToRemove.uiId && share.uiId) {
+          return share.uiId !== shareToRemove.uiId;
+        }
+        return share.id !== shareToRemove.id;
+      }),
     }));
-    if (normalizedName) {
-      setSmbDeleteShares((prev) => Array.from(new Set([...prev, normalizedName])));
+    if (normalizedId) {
+      setSmbDeleteShares((prev) => Array.from(new Set([...prev, normalizedId])));
     }
   };
 
@@ -762,20 +828,32 @@ export default function ConfigPage() {
     setSmbShares((prev) => ({ ...prev, enabled }));
   };
 
-  const updateSmbShareRow = (index: number, key: keyof SmbShare, value: string) => {
+  const addSmbShare = () => {
     setSmbShares((prev) => {
-      const shares = [...prev.shares];
-      if (!shares[index]) {
-        shares[index] = { name: '', quota: '500G', type: 'macos', uiId: smbNewRowIdRef.current };
-        smbNewRowIdRef.current = `smb-share-new-${smbRowIdRef.current++}`;
-      }
-      const nextValue = key === 'quota' ? value.toUpperCase() : value;
-      shares[index] = { ...shares[index], [key]: nextValue } as SmbShare;
-      return { ...prev, shares };
+      const nextUiId = `smb-share-new-${smbRowIdRef.current++}`;
+      const newShare: SmbShare = {
+        name: '',
+        quota: '500G',
+        type: 'macos',
+        uiId: nextUiId,
+      };
+      return {
+        ...prev,
+        shares: [...prev.shares, newShare],
+      };
     });
   };
 
-  const smbShareRows = [...smbShares.shares, { name: '', quota: '500G', type: 'macos' as const, uiId: smbNewRowIdRef.current }];
+  const updateSmbShareRow = (index: number, key: keyof SmbShare, value: string) => {
+    setSmbShares((prev) => {
+      const shares = [...prev.shares];
+      if (shares[index]) {
+        const nextValue = key === 'quota' ? value.toUpperCase() : value;
+        shares[index] = { ...shares[index], [key]: nextValue } as SmbShare;
+      }
+      return { ...prev, shares };
+    });
+  };
 
   return (
     <div className="card d-flex">
@@ -1061,115 +1139,192 @@ export default function ConfigPage() {
             <h3 className="mb-2">{t('CONFIG_SMB_SHARES_TITLE')}</h3>
             <p className="text-muted mb-3">{t('CONFIG_SMB_SHARES_DESCRIPTION')}</p>
 
-            {smbSuccess && (
-              <div className="alert alert-success" role="alert">
-                {smbSuccess}
-              </div>
-            )}
-
-            <div className="mb-4">
-              <div className="row g-2 align-items-center">
-                <div className="col-md-4">
-                  <label className="form-check form-switch">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      checked={smbShares.enabled}
-                      disabled={smbSaving}
-                      onChange={(e) => {
-                        toggleSmbEnabled(e.target.checked);
-                      }}
-                    />
-                    <span className="form-check-label">{t('CONFIG_SMB_ENABLE_LABEL')}</span>
-                  </label>
-                </div>
-                <div className="col-md-4 text-muted">
-                  {t('CONFIG_SMB_TOTAL_SPACE', { total: formatBytes(smbShares.storageTotalBytes) })}
-                </div>
-                <div className="col-md-4 text-md-end">
-                  <Button intent="primary" onClick={() => saveSmbSharesConfig()} disabled={smbSaving}>
-                    {smbSaving ? t('CONFIG_SMB_APPLYING') : t('CONFIG_SMB_SAVE_SHARES')}
-                  </Button>
-                </div>
-              </div>
-              {!smbShares.enabled && (
-                <div className="mt-2 text-muted">{t('CONFIG_SMB_ENABLE_HINT')}</div>
-              )}
-            </div>
-
-            {smbShares.enabled && (
-              <>
-                <div className="mb-4">
-                  <h5 className="mb-2">{t('CONFIG_SMB_CREDENTIALS_TITLE')}</h5>
-                  <div className="row g-2 align-items-end">
-                    <div className="col-md-4">
-                      <label className="form-label">{t('CONFIG_SMB_USERNAME')}</label>
-                      <input className="form-control" value={smbShares.username} disabled />
+            {(() => {
+              const totalBytes = smbShares.storageTotalBytes || 0;
+              const freeBytes = smbShares.storageFreeBytes || 0;
+              const usedBytes = Math.max(0, totalBytes - freeBytes);
+              const usedPercent = totalBytes > 0 ? (usedBytes / totalBytes) * 100 : 0;
+              return (
+                <>
+                  <div className="mb-4">
+                    <div className="row g-2 align-items-center mb-3">
+                      <div className="col-md-6">
+                        <label className="form-check form-switch m-0">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            checked={smbShares.enabled}
+                            disabled={smbSaving}
+                            onChange={(e) => {
+                              toggleSmbEnabled(e.target.checked);
+                            }}
+                          />
+                          <span className="form-check-label">{t('CONFIG_SMB_ENABLE_LABEL')}</span>
+                        </label>
+                      </div>
+                      <div className="col-md-6 text-md-end">
+                        <Button intent="primary" onClick={() => saveSmbSharesConfig()} disabled={smbSaving}>
+                          {smbSaving ? t('CONFIG_SMB_APPLYING') : t('CONFIG_SMB_SAVE_SHARES')}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="col-md-8">
-                      <label className="form-label">{t('CONFIG_SMB_PASSWORD_LABEL')}</label>
-                      <input
-                        className="form-control"
-                        type="password"
-                        value={smbPassword}
-                        onChange={(e) => setSmbPassword(e.target.value)}
-                        placeholder={t('CONFIG_SMB_PASSWORD_PLACEHOLDER')}
-                      />
-                    </div>
+                    {!smbShares.enabled && (
+                      <div className="mt-2 text-muted mb-3">{t('CONFIG_SMB_ENABLE_HINT')}</div>
+                    )}
+
+                    {totalBytes > 0 && (
+                      <div className="card p-3 mb-3 border bg-light-subtle">
+                        <div className="d-flex justify-content-between align-items-center mb-1">
+                          <span className="fw-semibold">{t('CONFIG_SMB_STORAGE_USAGE', 'Storage Usage')}</span>
+                          <span className="text-muted small">
+                            {t('CONFIG_SMB_STORAGE_VALUES', '{{used}} of {{total}} used ({{percent}}%)', {
+                              used: formatBytes(usedBytes),
+                              total: formatBytes(totalBytes),
+                              percent: usedPercent.toFixed(1),
+                            })}
+                          </span>
+                        </div>
+                        <div className="progress" style={{ height: '8px' }}>
+                          <div
+                            className={`progress-bar ${usedPercent > 90 ? 'bg-danger' : usedPercent > 75 ? 'bg-warning' : 'bg-success'}`}
+                            role="progressbar"
+                            style={{ width: `${usedPercent}%` }}
+                            aria-valuenow={usedPercent}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                          />
+                        </div>
+                        <div className="d-flex justify-content-between mt-1 text-muted small">
+                          <span>{t('CONFIG_SMB_STORAGE_FREE', '{{free}} free', { free: formatBytes(freeBytes) })}</span>
+                          <span>{usedPercent.toFixed(0)}%</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
 
-                <div className="d-flex align-items-center justify-content-between mb-2">
-                  <h5 className="m-0">{t('CONFIG_SMB_MANAGE_SHARES_TITLE')}</h5>
-                </div>
-
-                <div className="mb-3 text-muted">
-                  {smbShares.message || t('CONFIG_SMB_STATUS', { status: smbShares.status })}
-                </div>
-
-                <div className="d-flex flex-column gap-2">
-                  {smbShareRows.map((share, idx) => {
-                    const applied = smbShares.appliedShares.find((item) => item.name.toLowerCase() === share.name.toLowerCase());
-                    const isNewRow = idx >= smbShares.shares.length;
-                    return (
-                      <div key={share.uiId || `smb-share-${idx}`} className="border rounded p-2">
+                  {smbShares.enabled && (
+                    <>
+                      <div className="mb-4">
+                        <h5 className="mb-2">{t('CONFIG_SMB_CREDENTIALS_TITLE')}</h5>
                         <div className="row g-2 align-items-end">
-                          <div className="col-md-3">
-                            <label className="form-label">{t('CONFIG_SMB_SHARE_NAME')}</label>
-                            <input className="form-control" value={share.name} onChange={(e) => updateSmbShareRow(idx, 'name', e.target.value)} placeholder="MyBackup" />
+                          <div className="col-md-4">
+                            <label className="form-label">{t('CONFIG_SMB_USERNAME')}</label>
+                            <input className="form-control" value={smbShares.username} disabled />
                           </div>
-                          <div className="col-md-2">
-                            <label className="form-label">{t('CONFIG_SMB_SHARE_QUOTA')}</label>
-                            <input className="form-control" value={share.quota} onChange={(e) => updateSmbShareRow(idx, 'quota', e.target.value)} />
-                          </div>
-                          <div className="col-md-3">
-                            <label className="form-label">{t('CONFIG_SMB_SHARE_TYPE')}</label>
-                            <select className="form-select" value={share.type} onChange={(e) => updateSmbShareRow(idx, 'type', e.target.value)}>
-                              <option value="macos">{t('CONFIG_SMB_SHARE_TYPE_MACOS')}</option>
-                              <option value="windows">{t('CONFIG_SMB_SHARE_TYPE_WINDOWS')}</option>
-                            </select>
-                          </div>
-                          <div className="col-md-2">
-                            <div className="text-muted">{t('CONFIG_SMB_MOUNTPOINT')}</div>
-                            <div className="font-monospace">{applied?.mountpoint || '-'}</div>
-                          </div>
-                          <div className="col-md-2 d-flex justify-content-end">
-                            <Button intent="danger" onClick={() => setSmbDeleteTarget(share)} disabled={smbSaving || isNewRow}>
-                              {t('APP_ACTION_REMOVE')}
-                            </Button>
+                          <div className="col-md-8">
+                            <label className="form-label">{t('CONFIG_SMB_PASSWORD_LABEL')}</label>
+                            <input
+                              className="form-control"
+                              type="password"
+                              value={smbPassword}
+                              onChange={(e) => setSmbPassword(e.target.value)}
+                              placeholder={t('CONFIG_SMB_PASSWORD_PLACEHOLDER')}
+                            />
                           </div>
                         </div>
-                        {applied?.dataset && (
-                          <div className="mt-2 text-muted font-monospace">
-                            {applied.dataset}
+                      </div>
+
+                      <div className="d-flex align-items-center justify-content-between mb-2">
+                        <h5 className="m-0">{t('CONFIG_SMB_MANAGE_SHARES_TITLE')}</h5>
+                        <Button
+                          type="button"
+                          intent="primary"
+                          size="sm"
+                          onClick={addSmbShare}
+                          disabled={smbSaving}
+                        >
+                          + {t('CONFIG_SMB_ADD_SHARE_BUTTON')}
+                        </Button>
+                      </div>
+
+                      <div className="mb-3 text-muted">
+                        {smbShares.message || t('CONFIG_SMB_STATUS', { status: smbShares.status })}
+                      </div>
+
+                      <div className="d-flex flex-column gap-2 mb-3">
+                        {smbShares.shares.map((share, idx) => {
+                          const applied = share.id ? smbShares.appliedShares.find((item) => item.id === share.id) : undefined;
+                          const isNewShare = !share.id;
+                          return (
+                            <div key={share.uiId || `smb-share-${idx}`} className="border rounded p-2">
+                              <div className="row g-2 align-items-end">
+                                <div className="col-md-3">
+                                  <label className="form-label">{t('CONFIG_SMB_SHARE_NAME')}</label>
+                                  <input
+                                    className="form-control"
+                                    value={share.name}
+                                    onChange={(e) => updateSmbShareRow(idx, 'name', e.target.value)}
+                                    placeholder="MyBackup"
+                                  />
+                                </div>
+                                <div className="col-md-2">
+                                  <label className="form-label">{t('CONFIG_SMB_SHARE_QUOTA')}</label>
+                                  <input
+                                    className="form-control"
+                                    value={share.quota}
+                                    onChange={(e) => updateSmbShareRow(idx, 'quota', e.target.value)}
+                                  />
+                                </div>
+                                <div className="col-md-3">
+                                  <label className="form-label">{t('CONFIG_SMB_SHARE_TYPE')}</label>
+                                  <select
+                                    className="form-select"
+                                    value={share.type}
+                                    onChange={(e) => updateSmbShareRow(idx, 'type', e.target.value)}
+                                  >
+                                    <option value="macos">{t('CONFIG_SMB_SHARE_TYPE_MACOS')}</option>
+                                    <option value="windows">{t('CONFIG_SMB_SHARE_TYPE_WINDOWS')}</option>
+                                  </select>
+                                </div>
+                                <div className="col-md-2">
+                                  <div className="text-muted">{t('CONFIG_SMB_MOUNTPOINT')}</div>
+                                  <div className="font-monospace">{applied?.mountpoint || '-'}</div>
+                                </div>
+                                <div className="col-md-2 d-flex justify-content-end">
+                                  <Button
+                                    intent="danger"
+                                    onClick={() => {
+                                      if (isNewShare) {
+                                        removeSmbShare(share);
+                                      } else {
+                                        setSmbDeleteTarget(share);
+                                      }
+                                    }}
+                                    disabled={smbSaving}
+                                  >
+                                    {t('APP_ACTION_REMOVE')}
+                                  </Button>
+                                </div>
+                              </div>
+                              {applied?.dataset && (
+                                <div className="mt-2 text-muted font-monospace">
+                                  {applied.dataset}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {smbShares.shares.length === 0 && (
+                          <div className="text-center py-4 border rounded text-muted d-flex flex-column align-items-center gap-2" style={{ borderStyle: 'dashed' }}>
+                            <span>{t('CONFIG_SMB_NO_SHARES')}</span>
+                            <Button
+                              type="button"
+                              intent="secondary"
+                              variant="outline"
+                              size="sm"
+                              onClick={addSmbShare}
+                              disabled={smbSaving}
+                            >
+                              + {t('CONFIG_SMB_ADD_SHARE_BUTTON')}
+                            </Button>
                           </div>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </TabsContent>
 
@@ -1249,7 +1404,7 @@ export default function ConfigPage() {
               intent="danger"
               onClick={() => {
                 if (!smbDeleteTarget) return;
-                removeSmbShare(smbDeleteTarget.name);
+                removeSmbShare(smbDeleteTarget);
                 setSmbDeleteTarget(null);
               }}
               disabled={smbSaving}

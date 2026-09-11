@@ -23,10 +23,17 @@ export class AppStoreService {
       switch (data.command) {
         case 'update_all': {
           const stores = await this.appStoreRepository.getEnabledAppStores();
+          let success = true;
+          const messages: string[] = [];
+
           for (const store of stores) {
-            await this.repoHelpers.pullRepo(store.url, store.slug);
+            const result = await this.repoHelpers.pullRepo(store.url, store.slug);
+            if (!result.success) {
+              success = false;
+              messages.push(`${store.slug}: ${result.message}`);
+            }
           }
-          await reply({ success: true, message: 'All repos updated' });
+          await reply({ success, message: success ? 'All repos updated' : messages.join('; ') });
           break;
         }
         case 'clone_all': {
@@ -53,13 +60,19 @@ export class AppStoreService {
 
   public async pullRepositories() {
     const repositories = await this.appStoreRepository.getEnabledAppStores();
+    let success = true;
+    const messages: string[] = [];
 
     for (const repo of repositories) {
       this.logger.debug(`Pulling repo ${repo.url}`);
-      await this.repoHelpers.pullRepo(repo.url, repo.slug);
+      const result = await this.repoHelpers.pullRepo(repo.url, repo.slug);
+      if (!result.success) {
+        success = false;
+        messages.push(`${repo.slug}: ${result.message}`);
+      }
     }
 
-    return { success: true };
+    return { success, message: success ? undefined : messages.join('; ') };
   }
 
   /**
